@@ -190,8 +190,13 @@ type Session struct {
     TimerDuration      time.Duration   // 5 * time.Second
     Answers            map[string][]Answer
     Scores             map[string]int  // playerID → score
+    Combos             map[string]int  // playerID → current consecutive correct streak
     State              string          // "waiting" | "active" | "finished"
 }
+
+// Combo: consecutive correct answers by the same player.
+// Resets to 0 on any wrong answer or timer expiry (no answer).
+// combo value is broadcast in QUESTION_RESULT for UI display (x2, x3, etc.).
 
 type Question struct {
     ID            string
@@ -262,10 +267,25 @@ When a guest logs in with Google, Spring Boot:
 
 ## 4. Real-Time P2P Quiz Flow
 
-### Session lifecycle
+### Solo quiz mode
+When `mode: "solo"`, Go is not involved at all:
+```
+Mobile → POST /quiz/start { topic, mode: "solo" }
+Spring Boot → fetches 5 questions from MongoDB
+Spring Boot → creates QuizResult row (in-progress state)
+Spring Boot → returns { sessionId, mode: "solo", questions[] }  // no wsUrl
+
+Per question:
+Mobile → POST /quiz/answer { sessionId, questionId, answer }
+Spring Boot → evaluates answer, updates QuizResult, returns { isCorrect, correctAnswer, xpEarned }
+
+After all questions answered, Spring Boot finalises QuizResult, awards XP, checks badge thresholds.
+```
+
+### P2P session lifecycle
 
 ```
-1. Mobile → POST /quiz/start { opponentId? }
+1. Mobile → POST /quiz/start { topic, mode: "p2p", opponentId? }
    Spring Boot fetches 5 questions from MongoDB for the chosen topic
    Spring Boot → POST http://localhost:8081/session
                  { sessionId, playerA, playerB, questions[] }
@@ -299,11 +319,23 @@ When a guest logs in with Google, Spring Boot:
 
 | Direction | Type | Payload |
 |-----------|------|---------|
-| Go → Both | `QUESTION_START` | questionId, text, options, type, questionNumber, timerSeconds |
+| Go → Both | `QUESTION_START` | questionId, text, options, type, questionNumber, timerSeconds _(correctAnswer intentionally excluded — would allow client cheating)_ |
 | Mobile → Go | `PLAYER_ANSWER` | sessionId, playerId, answer |
-| Go → Both | `QUESTION_RESULT` | winnerId, correctAnswer, playerAScore, playerBScore, combo |
+| Go → Both | `QUESTION_RESULT` | winnerId, correctAnswer, playerAScore, playerBScore, playerACombo, playerBCombo |
 | Go → Both | `TIMER_TICK` | remainingSeconds (optional UI countdown) |
 | Go → Both | `SESSION_END` | winnerId, finalScores, xpEarned |
+| Go → Both | `PLAYER_DISCONNECTED` | playerId — broadcast immediately on WS close |
+
+### WebSocket disconnection policy
+If a player disconnects mid-session: Go broadcasts `PLAYER_DISCONNECTED`, immediately ends the session, awards the remaining player a win, and calls `POST /quiz/result` with the scores at the point of disconnection. No reconnection window — disconnect = forfeit. This keeps the session state machine simple.
+
+### Internal security for `POST /quiz/result`
+Go calls Spring Boot's `POST /quiz/result` with an `X-Internal-Secret: <secret>` header. Spring Boot's `JwtAuthFilter` checks this header on the `/quiz/result` path and rejects any request missing it, preventing mobile clients from submitting fabricated scores. The secret is configured via `internal.secret` in `application-local.yml` and the same value in Go's env (`INTERNAL_SECRET`).
+
+### Accuracy update logic
+After each quiz result is saved, Spring Boot recalculates `user_profiles.accuracy` as:
+`accuracy = (total correct answers across all quiz_results) / (total questions answered) * 100`
+Stored as `DECIMAL(5,2)`. Updated synchronously in `QuizService` after the result row is inserted.
 
 ### Why Go for this
 The Go WebSocket hub manages concurrent connections with goroutines. Each session runs its 5-second timer in its own goroutine. This handles many simultaneous P2P sessions efficiently without the overhead of Spring Boot's thread-per-request model.
@@ -352,12 +384,12 @@ Authorization: Basic <ONESIGNAL_REST_API_KEY>
 ```
 POST /auth/google              { idToken } → { jwt, user }
 POST /auth/guest               { guestId } → { jwt, user }
-POST /auth/merge               { guestId } → 200 OK
+POST /auth/merge               { guestId, idToken } → 200 OK
 ```
 
 **User / Profile**
 ```
-GET  /profile                  → UserProfile
+GET  /profile                  → UserProfile (aggregates badge rows + derives weeklyActivity from quiz_results.played_at for the current Mon–Sun week)
 PATCH /profile                 { username?, avatarUrl?, selectedTopics? }
 POST /notifications/register-device  { oneSignalPlayerId }
 ```
@@ -377,8 +409,13 @@ GET  /topics                   → Topic[]
 
 **Quiz**
 ```
-POST /quiz/start               { opponentId? } → { sessionId, wsUrl }
+POST /quiz/start               { topic, mode: "solo"|"p2p", opponentId? }
+                               solo → { sessionId, mode: "solo", questions[] }
+                               p2p  → { sessionId, mode: "p2p", wsUrl }
+POST /quiz/answer              { sessionId, questionId, answer }
+                               solo only — returns { isCorrect, correctAnswer, xpEarned }
 POST /quiz/result              { sessionId, playerAScore, playerBScore, xpEarned }
+                               internal — called by Go only; protected by X-Internal-Secret header
 GET  /quiz/history             → QuizResult[]
 ```
 
@@ -399,7 +436,6 @@ PATCH /notifications/read-all
 **Called by Spring Boot**
 ```
 POST /session                  { sessionId, playerA, playerB, questions[] } → 200 OK
-GET  /session/:id/status       → { state, scores }
 ```
 
 **Called by Mobile**
@@ -412,12 +448,14 @@ WS   /ws?sessionId=&playerId=
 POST http://localhost:8080/quiz/result  { sessionId, playerAScore, playerBScore, xpEarned }
 ```
 
-### Future NGINX migration (zero code changes needed)
+### Future NGINX migration (zero changes to Spring Boot or Go code)
 ```nginx
-# nginx.conf
+# nginx.conf — routes external (mobile) traffic only
 location /api/ { proxy_pass http://spring:8080/; }
 location /ws/  { proxy_pass http://go:8081/;     }
 ```
+
+**Important:** Spring Boot → Go internal calls (`POST http://go:8081/session`) bypass NGINX and use direct Docker service names. These are configured via the `go-quiz-service.base-url` env var and do not change when NGINX is added in front.
 
 Mobile env vars today:
 ```
@@ -440,11 +478,12 @@ After NGINX migration, both collapse to one base URL.
 | `spring-boot-starter-data-mongodb` | 3.3.x | MongoDB repositories |
 | `spring-boot-starter-security` | 3.3.x | Security filter chain |
 | `spring-boot-starter-validation` | 3.3.x | DTO validation |
-| `spring-boot-starter-scheduling` | 3.3.x | Scheduled notification jobs |
+| _(scheduling — no separate starter needed)_ | — | `@EnableScheduling` on `SchedulingConfig.java` activates `@Scheduled`; it's included via `spring-boot-starter-web` transitively |
 | `org.xerial:sqlite-jdbc` | 3.46.x | SQLite JDBC driver |
-| `com.github.gwenn:sqlite-dialect` | 0.1.x | Hibernate dialect for SQLite |
+| `org.hibernate.orm:hibernate-community-dialects` | 6.6.x | Hibernate 6 SQLite dialect (replaces gwenn — gwenn 0.1.x targets Hibernate 5 and fails on Spring Boot 3.x) |
 | `io.jsonwebtoken:jjwt-api` | 0.12.x | JWT |
 | `io.jsonwebtoken:jjwt-impl` | 0.12.x | JWT implementation |
+| `io.jsonwebtoken:jjwt-jackson` | 0.12.x | JWT JSON serialization (required — missing it throws MissingImplementationException at runtime) |
 | `com.google.firebase:firebase-admin` | 9.x | Firebase token verification |
 | `com.squareup.okhttp3:okhttp` | 4.x | OneSignal REST calls |
 | `org.projectlombok:lombok` | 1.18.x | Boilerplate reduction |
@@ -454,8 +493,8 @@ After NGINX migration, both collapse to one base URL.
 
 | Package | Purpose |
 |---------|---------|
-| `github.com/gorilla/websocket` | WebSocket server |
-| `github.com/gorilla/mux` | HTTP router |
+| `github.com/gorilla/websocket` | WebSocket server _(archived — functional for scaffold; consider `nhooyr.io/websocket` before production)_ |
+| `github.com/gorilla/mux` | HTTP router _(archived — consider `github.com/go-chi/chi` before production)_ |
 | `github.com/google/uuid` | Session ID generation |
 | Go | **1.22** | |
 
@@ -487,6 +526,9 @@ jwt:
 
 go-quiz-service:
   base-url: http://localhost:8081
+
+internal:
+  secret: YOUR_INTERNAL_SECRET_MIN_32_CHARS
 ```
 
 ### `service/spring/src/main/resources/application-local.yml.example` (committed)
@@ -497,4 +539,5 @@ Same structure with empty values — documents all required variables.
 ```
 SPRING_BASE_URL=http://localhost:8080
 PORT=8081
+INTERNAL_SECRET=YOUR_INTERNAL_SECRET_MIN_32_CHARS
 ```

@@ -219,11 +219,11 @@ Each feature exposes its own hook for data fetching — no shared query library 
 |------|----------|
 | `useFeed()` | `GET /cards?topic=&cursor=` |
 | `useCategories()` | `GET /topics` |
-| `useQuizSession()` | `POST /quiz/start`, `POST /quiz/answer` |
+| `useQuizSession()` | Solo: `POST /quiz/start`, `POST /quiz/answer` via REST. P2P: `POST /quiz/start` then WebSocket `ws://` for real-time play |
 | `useLeaderboard()` | `GET /leaderboard?period=weekly\|monthly\|alltime` |
 | `useProfile()` | `GET /profile`, `PATCH /profile` |
 | `useNotifications()` | `GET /notifications` |
-| `useAuth()` | `POST /auth/login`, `POST /auth/register`, `POST /auth/guest` |
+| `useAuth()` | `POST /auth/google`, `POST /auth/guest`, `POST /auth/merge` |
 
 All hooks return `{ data, isLoading, error, refetch }`.
 
@@ -335,8 +335,10 @@ interface FactCard {
 
 interface QuizSession {
   id: string
-  questions: Question[]
-  opponentId?: string     // null for solo
+  mode: 'solo' | 'p2p'
+  questions: Question[]   // included for solo mode; P2P questions arrive via WebSocket
+  opponentId?: string     // only present in p2p mode
+  wsUrl?: string          // only present in p2p mode
   endsAt: string          // ISO timestamp
 }
 
@@ -345,8 +347,15 @@ interface Question {
   type: 'mcq' | 'true_false' | 'fill_blank'
   text: string
   options?: string[]      // MCQ only
-  correctAnswer: string
+  // correctAnswer intentionally excluded from client type — server sends it only in QUESTION_RESULT / quiz/answer response
   xpReward: number
+}
+
+interface QuizAnswer {
+  questionId: string
+  correctAnswer: string   // revealed by server after submission
+  isCorrect: boolean
+  xpEarned: number
 }
 
 interface ApiError {
@@ -361,8 +370,10 @@ interface ApiError {
 
 ### Environment Variables (`.env.local`, `.env.example`)
 ```
-EXPO_PUBLIC_API_URL=http://localhost:3000
+EXPO_PUBLIC_API_URL=http://10.0.2.2:8080
+EXPO_PUBLIC_WS_URL=ws://10.0.2.2:8081
 ```
+Note: `10.0.2.2` is the Android emulator's alias for the host machine's `localhost`.
 - `.env.local` — local dev values, gitignored
 - `.env.example` — committed, documents required variables with empty values
 - Prefix `EXPO_PUBLIC_` is required for Expo to bundle the variable into the client
