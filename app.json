@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Quizly",
+    "slug": "quizly",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "quizly",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.quizly.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#050514"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font"
+    ]
+  }
+}
