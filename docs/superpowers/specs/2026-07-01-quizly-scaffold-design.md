@@ -336,10 +336,9 @@ interface FactCard {
 interface QuizSession {
   id: string
   mode: 'solo' | 'p2p'
-  questions: Question[]   // included for solo mode; P2P questions arrive via WebSocket
-  opponentId?: string     // only present in p2p mode
-  wsUrl?: string          // only present in p2p mode
-  endsAt: string          // ISO timestamp
+  questions?: Question[]  // solo mode only; P2P questions arrive via WebSocket QUESTION_START
+  opponentId?: string     // p2p mode only
+  wsUrl?: string          // p2p mode only
 }
 
 interface Question {
@@ -483,5 +482,5 @@ Imported once in `app/_layout.tsx`.
 | 08 | Reward popup | `reward.tsx` | `transparentModal` over current screen |
 | 09 | Notifications | `(tabs)/notifications.tsx` | Activity list; no Zustand store |
 | 10 | Profile | `(tabs)/profile.tsx` | XP, stats, badges |
-| 11 | Login | `(auth)/login.tsx` | Optional; guest can skip |
-| 12 | Register | `(auth)/register.tsx` | Optional |
+| 11 | Login | `(auth)/login.tsx` | Google Sign-In entry; calls `POST /auth/google` |
+| 12 | Register | `(auth)/register.tsx` | Same as login — different marketing copy for new users; same `POST /auth/google` endpoint |
