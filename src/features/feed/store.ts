@@ -20,7 +20,7 @@ export const useFeedStore = create<FeedState>()((set, get) => ({
   cards: [],
   cursor: null,
   hasMore: true,
-  currentTopic: '',
+  currentTopic: 'all',
   likedCardIds: [],
   savedCardIds: [],
   setCards: (cards, cursor, hasMore) => set({ cards, cursor, hasMore }),

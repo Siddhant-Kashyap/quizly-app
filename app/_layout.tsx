@@ -24,7 +24,7 @@ export default function RootLayout() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(quiz)" />
-        <Stack.Screen name="leaderboard" />
+        <Stack.Screen name="notifications" />
         <Stack.Screen name="reward" options={{ presentation: 'transparentModal' }} />
       </Stack>
     </>

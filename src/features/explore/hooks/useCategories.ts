@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
-import { api } from '@/shared/lib/api'
+import { MOCK_TOPICS, Topic, mockDelay } from '@/shared/lib/mockData'
 
-interface Topic { slug: string; label: string; iconUrl: string; cardCount: number }
-
+// NOTE: dummy-data mode — swap for `api.get('/topics')` once the backend is live.
 export function useCategories() {
   const [topics, setTopics] = useState<Topic[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -10,7 +9,7 @@ export function useCategories() {
 
   useEffect(() => {
     setIsLoading(true)
-    api.get<Topic[]>('/topics')
+    mockDelay(MOCK_TOPICS, 300)
       .then(setTopics)
       .catch(setError)
       .finally(() => setIsLoading(false))

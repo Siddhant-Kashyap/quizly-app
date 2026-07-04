@@ -12,3 +12,9 @@ export const colors = {
 } as const
 
 export type ColorToken = keyof typeof colors
+
+export const gradients = {
+  primary: [colors.cyan, colors.iris] as const,
+  accent: [colors.iris, colors.fuchsia] as const,
+  hero: [colors.cyan, colors.iris, colors.fuchsia] as const,
+}

@@ -1,19 +1,32 @@
-import { api, setAuthToken } from '@/shared/lib/api'
 import { useAuthStore } from '../store'
+import { useProfileStore } from '@/features/profile/store'
+import { MOCK_PROFILE, mockDelay } from '@/shared/lib/mockData'
+
+function generateGuestId() {
+  return `guest_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+}
 
 export function useAuth() {
   const store = useAuthStore()
 
-  const loginWithGoogle = async (idToken: string) => {
-    const { jwt, user } = await api.post<{ jwt: string; user: any }>('/auth/google', { idToken })
-    store.login(user, jwt)
+  // NOTE: dummy-data mode — no backend calls yet. Swap these bodies for real
+  // `api.post('/auth/google' | '/auth/guest', ...)` calls once the API is live.
+  const loginWithGoogle = async (_idToken: string) => {
+    await mockDelay(null, 300)
+    store.login({ id: 'demo-user', username: 'Demo User', email: 'demo@quizly.app' }, 'mock-jwt')
+    useProfileStore.getState().setProfile(MOCK_PROFILE)
   }
 
-  const loginAsGuest = async (guestId: string) => {
-    const { jwt } = await api.post<{ jwt: string; user: any }>('/auth/guest', { guestId })
-    setAuthToken(jwt)           // bearer token for subsequent requests
+  const loginAsGuest = async (guestId: string = generateGuestId()) => {
+    await mockDelay(null, 300)
     store.continueAsGuest(guestId)
+    useProfileStore.getState().setProfile({ ...MOCK_PROFILE, userId: guestId })
   }
 
-  return { loginWithGoogle, loginAsGuest, logout: store.logout, ...store }
+  const logout = () => {
+    store.logout()
+    useProfileStore.getState().clearProfile()
+  }
+
+  return { ...store, loginWithGoogle, loginAsGuest, logout }
 }

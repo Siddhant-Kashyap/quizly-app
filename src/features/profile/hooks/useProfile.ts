@@ -1,15 +1,19 @@
-import { useState, useEffect } from 'react'
-import { api } from '@/shared/lib/api'
+import { useEffect, useState } from 'react'
 import { useProfileStore } from '../store'
-import { UserProfile } from '@/shared/types'
+import { MOCK_PROFILE, mockDelay } from '@/shared/lib/mockData'
 
+// NOTE: dummy-data mode — swap for `api.get('/profile')` once the backend is live.
 export function useProfile() {
   const store = useProfileStore()
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(!store.profile)
 
   useEffect(() => {
+    if (store.profile) {
+      setIsLoading(false)
+      return
+    }
     setIsLoading(true)
-    api.get<UserProfile>('/profile')
+    mockDelay(MOCK_PROFILE, 300)
       .then(store.setProfile)
       .finally(() => setIsLoading(false))
   }, [])

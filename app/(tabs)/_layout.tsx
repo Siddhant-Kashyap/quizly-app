@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router'
-import { Home, Compass, Zap, Bell, User } from 'lucide-react-native'
+import { Home, Compass, Swords, Trophy, User } from 'lucide-react-native'
 import { colors } from '@/shared/theme/colors'
 
 export default function TabsLayout() {
@@ -15,8 +15,8 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" options={{ tabBarIcon: ({ color }) => <Home color={color} size={22} /> }} />
       <Tabs.Screen name="explore" options={{ tabBarIcon: ({ color }) => <Compass color={color} size={22} /> }} />
-      <Tabs.Screen name="quiz" options={{ tabBarIcon: ({ color }) => <Zap color={color} size={22} /> }} />
-      <Tabs.Screen name="notifications" options={{ tabBarIcon: ({ color }) => <Bell color={color} size={22} /> }} />
+      <Tabs.Screen name="quiz" options={{ tabBarIcon: ({ color }) => <Swords color={color} size={22} /> }} />
+      <Tabs.Screen name="leaderboard" options={{ tabBarIcon: ({ color }) => <Trophy color={color} size={22} /> }} />
       <Tabs.Screen name="profile" options={{ tabBarIcon: ({ color }) => <User color={color} size={22} /> }} />
     </Tabs>
   )

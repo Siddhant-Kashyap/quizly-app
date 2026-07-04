@@ -1,22 +1,23 @@
 import { useState, useCallback } from 'react'
-import { api } from '@/shared/lib/api'
 import { useFeedStore } from '../store'
-import { FactCard } from '@/shared/types'
+import { MOCK_FACT_CARDS, mockDelay } from '@/shared/lib/mockData'
 
 export function useFeed() {
   const store = useFeedStore()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
+  // NOTE: dummy-data mode — swap for `api.get('/cards?topic=...')` once the backend is live.
   const fetchCards = useCallback(async (topic: string) => {
     setIsLoading(true)
     setError(null)
     try {
-      const { cards, nextCursor } = await api.get<{ cards: FactCard[]; nextCursor: string | null }>(
-        `/cards?topic=${topic}`,
-      )
-      store.setCards(cards, nextCursor, !!nextCursor)
+      const cards = topic && topic !== 'all'
+        ? MOCK_FACT_CARDS.filter((c) => c.topic === topic)
+        : MOCK_FACT_CARDS
+      await mockDelay(null, 350)
       store.setTopic(topic)
+      store.setCards(cards, null, false)
     } catch (e) {
       setError(e as Error)
     } finally {
