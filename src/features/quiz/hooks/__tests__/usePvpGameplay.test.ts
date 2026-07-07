@@ -125,3 +125,61 @@ test('a close after a clean SESSION_END does not surface an error', () => {
 
   expect(result.current.error).toBeNull()
 })
+
+test('surfaces a connection error', () => {
+  const { result } = renderHook(() => usePvpGameplay('ws://x', 'me', 'opp'))
+  const ws = FakeWebSocket.instances[0]
+  act(() => { ws.onerror?.(new Error('boom')) })
+  expect(result.current.error).toBeTruthy()
+})
+
+test('reconnecting to a new session resets stale state instead of leaking it', () => {
+  const { result, rerender } = renderHook(
+    ({ wsUrl, myPlayerId, opponentId }: { wsUrl: string; myPlayerId: string; opponentId: string }) =>
+      usePvpGameplay(wsUrl, myPlayerId, opponentId),
+    { initialProps: { wsUrl: 'ws://session1', myPlayerId: 'me', opponentId: 'opp' } },
+  )
+  const ws1 = FakeWebSocket.instances[0]
+
+  act(() => {
+    ws1.onmessage?.({ data: JSON.stringify({ type: 'SESSION_END', winnerId: 'me', scores: { me: 3, opp: 1 }, xpEarned: { me: 60, opp: 20 } }) })
+  })
+  expect(result.current.sessionEnded).toBe(true)
+
+  rerender({ wsUrl: 'ws://session2', myPlayerId: 'me', opponentId: 'opp' })
+  const ws2 = FakeWebSocket.instances[1]
+
+  // A new session must start with fresh state, not the previous session's
+  // sessionEnded/scores/endedCleanlyRef leaking through.
+  expect(result.current.sessionEnded).toBe(false)
+  expect(result.current.myScore).toBe(0)
+
+  // An unexpected close on the NEW session's socket must surface an error —
+  // it must not be silently suppressed by the previous session's clean end.
+  act(() => { ws2.onclose?.() })
+  expect(result.current.error).toBeTruthy()
+  expect(result.current.sessionEnded).toBe(false)
+})
+
+test('a stale connection from before a wsUrl change cannot corrupt state from the new one', () => {
+  const { result, rerender } = renderHook(
+    ({ wsUrl, myPlayerId, opponentId }: { wsUrl: string; myPlayerId: string; opponentId: string }) =>
+      usePvpGameplay(wsUrl, myPlayerId, opponentId),
+    { initialProps: { wsUrl: 'ws://session1', myPlayerId: 'me', opponentId: 'opp' } },
+  )
+  const staleWs = FakeWebSocket.instances[0]
+
+  rerender({ wsUrl: 'ws://session2', myPlayerId: 'me', opponentId: 'opp' })
+  const newWs = FakeWebSocket.instances[1]
+
+  act(() => {
+    staleWs.onmessage?.({ data: JSON.stringify({ type: 'SESSION_END', winnerId: 'opp', scores: { me: 0, opp: 5 }, xpEarned: { me: 0, opp: 100 } }) })
+  })
+  expect(result.current.sessionEnded).toBe(false)
+
+  act(() => {
+    newWs.onmessage?.({ data: JSON.stringify({ type: 'SESSION_END', winnerId: 'me', scores: { me: 5, opp: 0 }, xpEarned: { me: 100, opp: 0 } }) })
+  })
+  expect(result.current.sessionEnded).toBe(true)
+  expect(result.current.winnerId).toBe('me')
+})

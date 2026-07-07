@@ -44,6 +44,12 @@ export function usePvpGameplay(wsUrl: string | null, myPlayerId: string, opponen
     // onmessage/onclose after this effect's cleanup already requested its
     // close, before the next effect's new socket exists.
     let active = true
+    // Reset per-session state on every (re)connect — wsUrl/myPlayerId/
+    // opponentId changing means a new session (e.g. a rematch reusing the
+    // same mounted hook instance), and leftover state from the previous
+    // session (sessionEnded, scores, endedCleanlyRef) must not leak into it.
+    endedCleanlyRef.current = false
+    setState(initialState)
 
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
