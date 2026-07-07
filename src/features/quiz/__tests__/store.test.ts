@@ -23,3 +23,18 @@ test('endSession clears all state', () => {
   expect(s.combo).toBe(0)
   expect(s.answers).toEqual({})
 })
+
+test('setPvpResult sets score/opponentScore/xpEarned/winnerId directly', () => {
+  useQuizStore.getState().setPvpResult(3, 1, 60, 'me')
+  const s = useQuizStore.getState()
+  expect(s.score).toBe(3)
+  expect(s.opponentScore).toBe(1)
+  expect(s.xpEarned).toBe(60)
+  expect(s.winnerId).toBe('me')
+})
+
+test('endSession resets winnerId back to empty string', () => {
+  useQuizStore.getState().setPvpResult(3, 1, 60, 'me')
+  useQuizStore.getState().endSession()
+  expect(useQuizStore.getState().winnerId).toBe('')
+})
