@@ -38,6 +38,16 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'quizly.auth',
       storage: createJSONStorage(() => AsyncStorage),
+      // Persisted state only restores the store's fields — api.ts's actual
+      // Authorization/X-Guest-Id headers come from separate in-memory
+      // module variables that only login()/continueAsGuest() set. Without
+      // this, every JS reload silently drops auth: the store still looks
+      // logged in, but every request goes out with no auth headers at all.
+      onRehydrateStorage: () => (state) => {
+        if (!state) return
+        setAuthToken(state.token)
+        setGuestId(state.guestId)
+      },
     },
   ),
 )
