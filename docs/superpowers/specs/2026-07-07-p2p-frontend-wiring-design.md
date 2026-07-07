@@ -79,22 +79,37 @@ identically for guest opponents — `AuthService.loginAsGuest` already sets
 a real `username` (`"Guest_xxxxxx"`) for every guest, so a guest-vs-guest
 match still gets a real name.
 
-## 1b. Backend: total question count on `QUESTION_START` (small addition to already-shipped Go code)
+## 1b. Backend: total question count + per-question XP on `QUESTION_START` (small addition to already-shipped Go code)
 
 The Go wire protocol currently never sends a session's total question
-count anywhere — `questionStartMsg` (`go/internal/ws/game_loop.go`) only
-carries `Type`, `Question`, `QuestionNumber`, `TimerSeconds`. But the
-existing frontend UI this spec reuses unchanged (`(quiz)/[id].tsx`'s
+count, nor a question's XP reward, anywhere on `QUESTION_START` —
+`questionStartMsg`/`wsQuestion` (`go/internal/ws/game_loop.go`) only
+carry `Type`/`Question`/`QuestionNumber`/`TimerSeconds` and
+`ID`/`Type`/`Text`/`Options` respectively. But the existing frontend UI
+this spec reuses unchanged (`(quiz)/[id].tsx`'s
 `"${index+1} of ${questions.length}"` label, `QuestionCard`'s `total`
-prop, and the progress-dot row) needs a total to render correctly, and
-hardcoding `5` identically on both sides of a network boundary (matching
-`matchmaker.go`'s `questionsPerSession` constant) would be a silent
-duplication bug waiting to happen the moment either side changes it
-independently. Fix: add one field to the wire message instead.
+prop, the progress-dot row, **and** the `"⚡ +{question.xpReward} XP if correct"`
+label, which renders for both solo and pvp) needs both a total count and
+the per-question XP value to render correctly. Hardcoding either value
+identically on both sides of a network boundary (matching
+`matchmaker.go`'s `questionsPerSession` constant, or a topic's per-question
+XP which actually varies — see `mockData.ts`'s `MOCK_QUESTIONS`, where
+`xpReward` is `10`/`15`/`20` depending on the question) would be wrong or
+a silent duplication bug. Fix: add both fields to the wire message
+instead — both are already available server-side on the `Session`/`Question`
+the loop already holds, no new data needed.
 
 **File to modify:** `service/go/internal/ws/game_loop.go`
 
 ```go
+type wsQuestion struct {
+    ID       string   `json:"id"`
+    Type     string   `json:"type"`
+    Text     string   `json:"text"`
+    Options  []string `json:"options"`
+    XPReward int      `json:"xpReward"`
+}
+
 type questionStartMsg struct {
     Type           string     `json:"type"`
     Question       wsQuestion `json:"question"`
@@ -103,11 +118,10 @@ type questionStartMsg struct {
     TimerSeconds   int        `json:"timerSeconds"`
 }
 ```
-`broadcastQuestionStart` populates it from `len(g.session.Questions)`
-(already available on the `Session` the loop already holds — no new
-data needed, just one more field read off something already in scope).
+`broadcastQuestionStart` populates `TotalQuestions` from
+`len(g.session.Questions)` and `wsQuestion.XPReward` from `q.XPReward`.
 This is a backwards-compatible wire addition (existing consumers that
-don't read the new field are unaffected) to already-reviewed,
+don't read the new fields are unaffected) to already-reviewed,
 already-shipped code from the prior plan — small and self-contained
 enough not to need its own separate spec/plan cycle; it's included here
 as a prerequisite this frontend work depends on.
@@ -189,9 +203,10 @@ handed over by `MATCH_FOUND` — no construction needed on the client side,
 unlike the matchmaking URL). Parses each inbound message by `type`:
 
 - `QUESTION_START` → sets `question` (from the message's nested `question`
-  object: `id`, `type`, `text`, `options`), `questionNumber`, `totalQuestions`
-  (from the new field added in §1b), `timerSeconds` (from the message's
-  `timerSeconds`), resets `correctAnswer` to null for the new question.
+  object: `id`, `type`, `text`, `options`, `xpReward` — the last one is the
+  other new field added in §1b), `questionNumber`, `totalQuestions` (also
+  from §1b), `timerSeconds` (from the message's `timerSeconds`), resets
+  `correctAnswer` to null for the new question.
 - `QUESTION_RESULT` → sets `correctAnswer`, and derives `myScore`/`opponentScore`/`myCombo`
   from the message's `scores`/`combos` maps (keyed by real player ID) by
   looking up `myPlayerId`/`opponentId` — these are absolute values from
