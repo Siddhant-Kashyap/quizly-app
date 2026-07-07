@@ -70,15 +70,47 @@ extra fields this shouldn't expose, like `AuthResponse.UserDto`'s
 `email`): `PublicUserDto(String id, String username, String avatarUrl)`
 in `user/dto/`. Backed by `UserRepository.findById` (already available,
 `UserRepository extends JpaRepository<User, String>`). A small
-`UserService` method does the lookup + 404-on-empty (`IllegalArgumentException`,
-consistent with the rest of the codebase's `GlobalExceptionHandler` →
-400... actually a not-found should be 404, not 400 — use
-`ResponseStatusException(HttpStatus.NOT_FOUND)` directly, since
-`GlobalExceptionHandler` only maps `IllegalArgumentException`→400 and
-generic `RuntimeException`→500, neither of which is right for "not
-found"). Works identically for guest opponents — `AuthService.loginAsGuest`
-already sets a real `username` (`"Guest_xxxxxx"`) for every guest, so a
-guest-vs-guest match still gets a real name.
+`UserService` method does the lookup and throws
+`ResponseStatusException(HttpStatus.NOT_FOUND)` if absent — `GlobalExceptionHandler`
+only maps `IllegalArgumentException`→400 and generic `RuntimeException`→500,
+neither of which is the right status for "not found", so this bypasses
+that handler entirely with Spring's own `ResponseStatusException`. Works
+identically for guest opponents — `AuthService.loginAsGuest` already sets
+a real `username` (`"Guest_xxxxxx"`) for every guest, so a guest-vs-guest
+match still gets a real name.
+
+## 1b. Backend: total question count on `QUESTION_START` (small addition to already-shipped Go code)
+
+The Go wire protocol currently never sends a session's total question
+count anywhere — `questionStartMsg` (`go/internal/ws/game_loop.go`) only
+carries `Type`, `Question`, `QuestionNumber`, `TimerSeconds`. But the
+existing frontend UI this spec reuses unchanged (`(quiz)/[id].tsx`'s
+`"${index+1} of ${questions.length}"` label, `QuestionCard`'s `total`
+prop, and the progress-dot row) needs a total to render correctly, and
+hardcoding `5` identically on both sides of a network boundary (matching
+`matchmaker.go`'s `questionsPerSession` constant) would be a silent
+duplication bug waiting to happen the moment either side changes it
+independently. Fix: add one field to the wire message instead.
+
+**File to modify:** `service/go/internal/ws/game_loop.go`
+
+```go
+type questionStartMsg struct {
+    Type           string     `json:"type"`
+    Question       wsQuestion `json:"question"`
+    QuestionNumber int        `json:"questionNumber"`
+    TotalQuestions int        `json:"totalQuestions"`
+    TimerSeconds   int        `json:"timerSeconds"`
+}
+```
+`broadcastQuestionStart` populates it from `len(g.session.Questions)`
+(already available on the `Session` the loop already holds — no new
+data needed, just one more field read off something already in scope).
+This is a backwards-compatible wire addition (existing consumers that
+don't read the new field are unaffected) to already-reviewed,
+already-shipped code from the prior plan — small and self-contained
+enough not to need its own separate spec/plan cycle; it's included here
+as a prerequisite this frontend work depends on.
 
 ---
 
@@ -135,6 +167,7 @@ retry loop — keep this simple).
 interface PvpGameplayState {
   question: Question | null
   questionNumber: number
+  totalQuestions: number
   timerSeconds: number
   myScore: number
   opponentScore: number
@@ -156,8 +189,9 @@ handed over by `MATCH_FOUND` — no construction needed on the client side,
 unlike the matchmaking URL). Parses each inbound message by `type`:
 
 - `QUESTION_START` → sets `question` (from the message's nested `question`
-  object: `id`, `type`, `text`, `options`), `questionNumber`, resets
-  `correctAnswer` to null for the new question.
+  object: `id`, `type`, `text`, `options`), `questionNumber`, `totalQuestions`
+  (from the new field added in §1b), `timerSeconds` (from the message's
+  `timerSeconds`), resets `correctAnswer` to null for the new question.
 - `QUESTION_RESULT` → sets `correctAnswer`, and derives `myScore`/`opponentScore`/`myCombo`
   from the message's `scores`/`combos` maps (keyed by real player ID) by
   looking up `myPlayerId`/`opponentId` — these are absolute values from
@@ -187,9 +221,37 @@ just a cosmetic `opponent` name string, and uses
 longer needed, a real opponent drives their own side of the match).
 The existing UI (question card, score badges for "You"/opponent, combo
 pill, XP-per-question label, progress dots) is **not visually
-redesigned** — it just reads `question`/`myScore`/`opponentScore`/`myCombo`
-from the new hook instead of the old simulated state. `handleAnswer` calls
+redesigned** — it just reads `question`/`myScore`/`opponentScore`/`myCombo`/`questionNumber`/`totalQuestions`
+from the new hook instead of the old simulated state (replacing
+`questions.length`/`index` throughout, including the progress-dot row and
+`QuestionCard`'s `total` prop). `handleAnswer` calls
 `submitAnswer(question.id, answer)` instead of the solo-mode REST call.
+
+**Timer behavior changes.** The existing `<Timer duration={PVP_QUESTION_SECONDS} ...>`
+now uses `duration={timerSeconds}` from the hook (sourced from the
+server's own `QUESTION_START.timerSeconds`) instead of the hardcoded
+`PVP_QUESTION_SECONDS = 5` local constant — both currently happen to be
+5s, but the client should follow the server's stated value rather than
+assume it never changes. More importantly, `handleExpire` (currently:
+auto-submits an empty answer via `handleAnswer('')` when the local timer
+hits zero) **no longer submits anything on expiry**. In the real
+protocol, not answering in time isn't a distinct "explicit skip" message —
+it's simply not sending `PLAYER_ANSWER` at all, and the server's own
+timer (authoritative, already running independently of this client's
+local countdown) ends the question and broadcasts `QUESTION_RESULT`
+regardless. The local `Timer` is now purely a visual countdown mirroring
+the server's timer for UX (and to disable further answer taps once it
+hits zero); `onExpire` just needs to lock the UI (equivalent to today's
+`disabled={!!selected}` gating, but keyed off expiry too) rather than
+fire an actual submission.
+
+**Advancing questions.** `[id].tsx` no longer needs its own `setTimeout`-based
+"show result for 1200ms, then advance `index`" logic for pvp — the next
+`QUESTION_START` message arriving *is* the advance signal (the hook
+resets `question`/`correctAnswer` accordingly), driven entirely by the
+server's pacing. (Solo mode keeps its existing client-driven timing
+unchanged — this only affects the pvp branch.)
+
 When `sessionEnded` becomes true, the existing quiz store gets one new
 setter call (see §4) with the final score/opponentScore/xpEarned/winnerId,
 then navigates to `/reward` exactly as today.
@@ -208,21 +270,35 @@ random-bot-name assignment entirely.
 `useQuizStore` (`app/src/features/quiz/store.ts`) gets one new setter,
 since its existing `addScore(10)`/`addOpponentScore(10)` increment-style
 API assumes solo mode's fixed-10-points-per-question convention, which
-doesn't apply to pvp's server-authoritative absolute scores:
+doesn't apply to pvp's server-authoritative absolute scores. It also
+gains one new field, `winnerId: string` (default `''`), alongside the
+existing `score`/`opponentScore`/`xpEarned`:
 
 ```ts
-setPvpResult: (score: number, opponentScore: number, xpEarned: number) => void
+setPvpResult: (score: number, opponentScore: number, xpEarned: number, winnerId: string) => void
 ```
 
-Sets those three fields directly (score/opponentScore/xpEarned already
-exist on the store; this is a new way to set them, not new fields).
+**Why `winnerId` has to be threaded through, not just derived from
+scores:** `reward.tsx` currently derives pvp outcome by comparing scores
+(`score > opponentScore ? 'win' : score < opponentScore ? 'lose' : 'draw'`).
+That's wrong for the disconnect-as-forfeit ending — the backend's own
+design (already shipped) declares the *still-connected* player the winner
+"regardless of current score," so a player who was behind on points when
+their opponent disconnected still wins. Comparing scores alone would show
+that player "lose" despite the server saying they won. Fix: `reward.tsx`'s
+outcome derivation changes to
+`winnerId === myPlayerId ? 'win' : winnerId === '' ? 'draw' : 'lose'`,
+using the store's new `winnerId` field (compared against the current
+user's id from `useAuth()`) instead of comparing scores. Scores are still
+displayed exactly as today ("You {score} · {opponentName} {opponentScore}");
+only the win/lose/draw *label* logic changes.
+
 `session.opponentId` already exists on `QuizSession`; add one new optional
 field, `opponentName?: string`, set by `[id].tsx` when it receives the
 route param, so `reward.tsx`'s existing
 `session?.opponentId ?? 'Opponent'` line becomes
-`session?.opponentName ?? 'Opponent'` (the only change `reward.tsx`
-needs — everything else there already reads `score`/`opponentScore`/`xpEarned`
-from the store, unchanged).
+`session?.opponentName ?? 'Opponent'` (the only other change `reward.tsx`
+needs).
 
 ---
 
