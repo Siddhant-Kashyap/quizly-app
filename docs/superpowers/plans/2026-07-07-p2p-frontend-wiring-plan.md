@@ -1712,8 +1712,8 @@ export const ONBOARDING_TOPICS = [
   { slug: 'pop-culture', label: 'Pop Culture', iconUrl: 'Film', cardCount: 19 },
 ]
 ```
-(`mockDelay` is kept — check Step 3 below for whether anything still
-uses it before assuming it's fully dead.)
+(`mockDelay` had zero remaining call sites after checking per Step 3 below,
+so it was removed too along with the `Question` import it no longer needs.)
 
 - [ ] **Step 3: Confirm nothing else references the deleted exports**
 

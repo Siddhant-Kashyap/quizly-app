@@ -1,40 +1,42 @@
-import { QuizSession, QuizAnswer, Question } from '@/shared/types'
+import { QuizSession, QuizAnswer, StartQuizResponse, AnswerResponse, Topic } from '@/shared/types'
 import { useQuizStore } from '../store'
-import { MOCK_QUESTIONS, MOCK_ANSWER_KEY, mockDelay } from '@/shared/lib/mockData'
+import { api } from '@/shared/lib/api'
 
-function questionsForTopic(topic: string): Question[] {
-  if (topic === 'all') {
-    return Object.values(MOCK_QUESTIONS).flat().sort(() => Math.random() - 0.5).slice(0, 6)
-  }
-  return MOCK_QUESTIONS[topic] ?? Object.values(MOCK_QUESTIONS).flat().slice(0, 6)
+// The backend has no "all topics" concept — POST /quiz/start does an exact
+// topic match (see service/docs/API.md §2/§4). To keep the "Mixed Quiz"
+// experience, start a session per real topic and merge the questions
+// client-side, keeping one of the returned sessionIds to submit
+// answers/results against (sessionId isn't validated against server-side
+// session state today — see API.md §2 AnswerRequest note).
+async function startSoloAllTopics(): Promise<StartQuizResponse> {
+  const topics = await api.get<Topic[]>('/topics')
+  const responses = await Promise.all(
+    topics.map((t) => api.post<StartQuizResponse>('/quiz/start', { topic: t.slug, mode: 'solo' })),
+  )
+  const questions = responses.flatMap((r) => r.questions).sort(() => Math.random() - 0.5).slice(0, 6)
+  return { sessionId: responses[0].sessionId, mode: 'solo', questions, wsUrl: null }
 }
 
-// NOTE: dummy-data mode — swap for `api.post('/quiz/start' | '/quiz/answer', ...)` once the backend is live.
 export function useQuizSession() {
   const store = useQuizStore()
 
   const startSolo = async (topic: string): Promise<QuizSession> => {
-    const session: QuizSession = { id: `solo_${topic}_${Date.now()}`, mode: 'solo', questions: questionsForTopic(topic) }
-    await mockDelay(null, 250)
+    const response = topic === 'all'
+      ? await startSoloAllTopics()
+      : await api.post<StartQuizResponse>('/quiz/start', { topic, mode: 'solo' })
+    const session: QuizSession = { sessionId: response.sessionId, mode: 'solo', questions: response.questions }
     store.setSession(session)
     return session
   }
 
-  const startP2P = async (topic: string, opponentId?: string): Promise<QuizSession> => {
-    const session: QuizSession = { id: `p2p_${topic}_${Date.now()}`, mode: 'p2p', opponentId, questions: questionsForTopic(topic) }
-    await mockDelay(null, 250)
-    store.setSession(session)
-    return session
+  const submitAnswer = async (sessionId: string, questionId: string, answer: string, mode: 'solo'): Promise<QuizAnswer> => {
+    const result = await api.post<AnswerResponse>('/quiz/answer', { sessionId, questionId, answer })
+    return { questionId, ...result }
   }
 
-  const submitAnswer = async (sessionId: string, questionId: string, answer: string): Promise<QuizAnswer> => {
-    const correctAnswer = MOCK_ANSWER_KEY[questionId] ?? ''
-    const isCorrect = answer === correctAnswer
-    const question = Object.values(MOCK_QUESTIONS).flat().find((q) => q.id === questionId)
-    const xpEarned = isCorrect ? question?.xpReward ?? 0 : 0
-    await mockDelay(null, 150)
-    return { questionId, correctAnswer, isCorrect, xpEarned }
+  const finishSolo = async (sessionId: string, score: number, xpEarned: number, comboMax: number, accuracy: number) => {
+    await api.post('/quiz/solo/result', { sessionId, score, xpEarned, comboMax, accuracy })
   }
 
-  return { startSolo, startP2P, submitAnswer, ...store }
+  return { startSolo, submitAnswer, finishSolo, ...store }
 }
