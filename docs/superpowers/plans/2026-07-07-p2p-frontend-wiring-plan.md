@@ -493,8 +493,11 @@ class FakeWebSocket {
   }
   send(_data: string) {}
   close() {
+    // Deliberately does NOT fire onclose synchronously — real
+    // WebSocket.close() is asynchronous (closing handshake), and a test
+    // below exercises exactly the window this creates: a "closing" socket
+    // whose handlers are still technically callable.
     this.closed = true
-    this.onclose?.()
   }
 }
 
@@ -537,6 +540,32 @@ test('surfaces a connection error', () => {
   act(() => { ws.onerror?.(new Error('boom')) })
   expect(result.current.error).toBeTruthy()
 })
+
+test('a stale connection from before a topic/playerId change cannot corrupt state from the new one', () => {
+  const { result, rerender } = renderHook(
+    ({ topic, playerId }) => useMatchmaking(topic, playerId),
+    { initialProps: { topic: 'science', playerId: 'player-1' } },
+  )
+  const staleWs = FakeWebSocket.instances[0]
+
+  rerender({ topic: 'history', playerId: 'player-1' })
+  const newWs = FakeWebSocket.instances[1]
+  expect(staleWs.closed).toBe(true) // cleanup requested the close...
+
+  // ...but since close() is async in reality, the stale socket's handler
+  // is still technically reachable for a window — a late message on it
+  // must not be treated as a real match by the hook's current instance.
+  act(() => {
+    staleWs.onmessage?.({ data: JSON.stringify({ type: 'MATCH_FOUND', sessionId: 'stale', opponentId: 'x', wsUrl: 'ws://stale' }) })
+  })
+  expect(result.current.status).not.toBe('matched')
+
+  act(() => {
+    newWs.onmessage?.({ data: JSON.stringify({ type: 'MATCH_FOUND', sessionId: 'real', opponentId: 'y', wsUrl: 'ws://real' }) })
+  })
+  expect(result.current.status).toBe('matched')
+  expect(result.current.match?.sessionId).toBe('real')
+})
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -561,24 +590,34 @@ export function useMatchmaking(topic: string, playerId: string | null) {
 
   useEffect(() => {
     if (!playerId) return
+    // WebSocket.close() is asynchronous — a stale socket from a prior
+    // render (e.g. topic/playerId changing while still waiting) can still
+    // deliver onmessage/onclose after this effect's cleanup has already
+    // requested its close, before the next effect's new socket exists.
+    // Without this guard, that stale event would still call setState on
+    // the current component instance, potentially reporting a match (or
+    // an error) from a connection that's no longer the active one.
+    let active = true
 
     const ws = new WebSocket(
-      `${process.env.EXPO_PUBLIC_WS_URL}/matchmaking/ws?playerId=${encodeURIComponent(playerId)}&topic=${encodeURIComponent(topic)}`,
+      `${process.env.EXPO_PUBLIC_WS_URL ?? ''}/matchmaking/ws?playerId=${encodeURIComponent(playerId)}&topic=${encodeURIComponent(topic)}`,
     )
     wsRef.current = ws
 
-    ws.onopen = () => setStatus('waiting')
+    ws.onopen = () => { if (active) setStatus('waiting') }
     ws.onmessage = (e) => {
+      if (!active) return
       const msg = JSON.parse(e.data as string) as MatchFoundMessage
       if (msg.type === 'MATCH_FOUND') {
         setMatch(msg)
         setStatus('matched')
       }
     }
-    ws.onerror = () => setError('Failed to connect to matchmaking')
-    ws.onclose = () => setStatus((s) => (s === 'matched' ? s : 'error'))
+    ws.onerror = () => { if (active) setError('Failed to connect to matchmaking') }
+    ws.onclose = () => { if (active) setStatus((s) => (s === 'matched' ? s : 'error')) }
 
     return () => {
+      active = false
       ws.close()
     }
   }, [topic, playerId])
@@ -594,7 +633,7 @@ export function useMatchmaking(topic: string, playerId: string | null) {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd app && npx jest useMatchmaking -v`
-Expected: PASS (all 4 tests)
+Expected: PASS (all 5 tests)
 
 - [ ] **Step 5: Commit**
 
