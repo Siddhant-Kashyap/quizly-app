@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { View } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
-import { Text, Avatar, Skeleton } from '@/shared/components'
+import { Text, Avatar, Skeleton, Button } from '@/shared/components'
 import { QuestionCard } from '@/features/quiz/components/QuestionCard'
 import { AnswerOption, AnswerState } from '@/features/quiz/components/AnswerOption'
 import { Timer } from '@/features/quiz/components/Timer'
@@ -161,7 +161,7 @@ function PvpQuizPlay({ sessionId, opponentId, opponentName, wsUrl }: { sessionId
   const setPvpResult = useQuizStore((s) => s.setPvpResult)
   const {
     question, questionNumber, totalQuestions, timerSeconds,
-    myScore, opponentScore, myCombo, correctAnswer, sessionEnded, winnerId, xpEarned,
+    myScore, opponentScore, myCombo, correctAnswer, sessionEnded, winnerId, xpEarned, error,
     submitAnswer,
   } = usePvpGameplay(wsUrl, user!.id, opponentId)
 
@@ -189,7 +189,7 @@ function PvpQuizPlay({ sessionId, opponentId, opponentName, wsUrl }: { sessionId
   }, [sessionEnded])
 
   const handleAnswer = (answer: string) => {
-    if (!question || selected || expired) return
+    if (!question || selected || expired || sessionEnded) return
     setSelected(answer)
     submitAnswer(question.id, answer)
     // No synchronous result here, unlike solo mode — correctness feedback
@@ -202,6 +202,16 @@ function PvpQuizPlay({ sessionId, opponentId, opponentName, wsUrl }: { sessionId
     if (selected === correctAnswer) haptics.success()
     else haptics.error()
   }, [correctAnswer])
+
+  if (error) {
+    return (
+      <View className="flex-1 bg-void items-center justify-center px-8">
+        <Text variant="title" className="text-white mb-2">Connection lost</Text>
+        <Text variant="body" className="text-white/50 text-center mb-10">{error}</Text>
+        <Button label="Back to home" variant="ghost" onPress={() => router.replace('/(tabs)')} />
+      </View>
+    )
+  }
 
   if (!question) {
     return (
@@ -257,7 +267,7 @@ function PvpQuizPlay({ sessionId, opponentId, opponentName, wsUrl }: { sessionId
             label={option}
             letter={LETTERS[i] ?? `${i + 1}`}
             state={optionState(option)}
-            disabled={!!selected || expired}
+            disabled={!!selected || expired || sessionEnded}
             onPress={() => handleAnswer(option)}
           />
         ))}
