@@ -166,7 +166,19 @@ git commit -m "feat: send totalQuestions and per-question xpReward on QUESTION_S
 - Create: `service/spring/src/main/java/com/quizly/user/dto/PublicUserDto.java`
 - Modify: `service/spring/src/main/java/com/quizly/user/service/UserService.java`
 - Modify: `service/spring/src/main/java/com/quizly/user/controller/UserController.java`
+- Modify: `service/spring/src/main/java/com/quizly/shared/exception/GlobalExceptionHandler.java`
 - Test: `service/spring/src/test/java/com/quizly/user/UserControllerTest.java` (new)
+
+**Important correction to an earlier draft of this task:** the original
+plan claimed throwing `ResponseStatusException` "bypasses
+`GlobalExceptionHandler` entirely" — that's wrong for this specific
+codebase. `GlobalExceptionHandler` has `@ExceptionHandler(RuntimeException.class)`,
+and `ResponseStatusException` **is** a `RuntimeException`, so without an
+explicit handler for it, Spring's `@ExceptionHandler` resolution picks
+that broad catch-all and forces every `ResponseStatusException` into a
+500 — never reaching Spring's own default 404 behavior. Step 4a below
+adds the missing explicit handler; without it, Step 6's "404" test would
+actually get back a 500.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -282,9 +294,27 @@ public PublicUserDto getPublicProfile(String userId) {
 ```
 (Using `ResponseStatusException` directly, not `IllegalArgumentException`
 — `GlobalExceptionHandler` only maps that to 400, and "not found" needs to
-be a real 404. `ResponseStatusException` is handled by Spring itself,
-bypassing `GlobalExceptionHandler` entirely, which is exactly what's
-needed here.)
+be a real 404.)
+
+- [ ] **Step 4a: Add an explicit `ResponseStatusException` handler to `GlobalExceptionHandler`**
+
+Without this, the exception thrown in Step 4 would be caught by the
+existing broad `@ExceptionHandler(RuntimeException.class)` (since
+`ResponseStatusException extends RuntimeException`) and forced into a
+500 instead of the intended 404 — Spring picks the *closest matching*
+`@ExceptionHandler` method within a class, so adding a method for the
+more specific type here is what makes it win over the generic one; no
+ordering/priority annotation needed. In
+`service/spring/src/main/java/com/quizly/shared/exception/GlobalExceptionHandler.java`,
+add (alongside the existing `RuntimeException`/`IllegalArgumentException`
+handlers):
+```java
+@ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+public ResponseEntity<ApiError> handle(org.springframework.web.server.ResponseStatusException ex) {
+    return ResponseEntity.status(ex.getStatusCode())
+            .body(new ApiError(ex.getStatusCode().value(), ex.getReason()));
+}
+```
 
 - [ ] **Step 5: Wire the controller**
 
@@ -321,6 +351,7 @@ cd service
 git add spring/src/main/java/com/quizly/user/dto/PublicUserDto.java \
         spring/src/main/java/com/quizly/user/service/UserService.java \
         spring/src/main/java/com/quizly/user/controller/UserController.java \
+        spring/src/main/java/com/quizly/shared/exception/GlobalExceptionHandler.java \
         spring/src/test/java/com/quizly/user/UserControllerTest.java
 git commit -m "feat: add GET /users/{id}/public-profile for opponent name lookup"
 ```
@@ -1246,6 +1277,7 @@ function SoloQuizPlay({ id }: { id: string }) {
 function PvpQuizPlay({ sessionId, opponentId, opponentName, wsUrl }: { sessionId: string; opponentId: string; opponentName: string; wsUrl: string }) {
   const { user } = useAuth()
   const haptics = useHaptics()
+  const setSession = useQuizStore((s) => s.setSession)
   const setPvpResult = useQuizStore((s) => s.setPvpResult)
   const {
     question, questionNumber, totalQuestions, timerSeconds,
@@ -1255,6 +1287,14 @@ function PvpQuizPlay({ sessionId, opponentId, opponentName, wsUrl }: { sessionId
 
   const [selected, setSelected] = useState<string | null>(null)
   const [expired, setExpired] = useState(false)
+
+  useEffect(() => {
+    // reward.tsx reads session.mode/opponentName from the store — nothing
+    // else populates it for the pvp path (solo's useQuizSession.startSolo
+    // does this for solo via its own setSession call), so this screen has
+    // to set it itself, once, on mount.
+    setSession({ sessionId, mode: 'p2p', opponentId, opponentName, wsUrl })
+  }, [sessionId, opponentId, opponentName, wsUrl, setSession])
 
   useEffect(() => {
     // A new question arriving resets per-question local UI state.
@@ -1378,8 +1418,8 @@ export default function QuizPlay() {
       <PvpQuizPlay
         sessionId={sessionId}
         opponentId={opponentId}
-        opponentName={decodeURIComponent(opponentName ?? 'Opponent')}
-        wsUrl={decodeURIComponent(wsUrl)}
+        opponentName={opponentName ?? 'Opponent'}
+        wsUrl={wsUrl}
       />
     )
   }
