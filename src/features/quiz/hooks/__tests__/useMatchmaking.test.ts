@@ -16,8 +16,11 @@ class FakeWebSocket {
   }
   send(_data: string) {}
   close() {
+    // Deliberately does NOT fire onclose synchronously — real
+    // WebSocket.close() is asynchronous (closing handshake), and a test
+    // below exercises exactly the window this creates: a "closing" socket
+    // whose handlers are still technically callable.
     this.closed = true
-    this.onclose?.()
   }
 }
 
@@ -59,4 +62,30 @@ test('surfaces a connection error', () => {
   const ws = FakeWebSocket.instances[0]
   act(() => { ws.onerror?.(new Error('boom')) })
   expect(result.current.error).toBeTruthy()
+})
+
+test('a stale connection from before a topic/playerId change cannot corrupt state from the new one', () => {
+  const { result, rerender } = renderHook(
+    ({ topic, playerId }: { topic: string; playerId: string | null }) => useMatchmaking(topic, playerId),
+    { initialProps: { topic: 'science', playerId: 'player-1' } },
+  )
+  const staleWs = FakeWebSocket.instances[0]
+
+  rerender({ topic: 'history', playerId: 'player-1' })
+  const newWs = FakeWebSocket.instances[1]
+  expect(staleWs.closed).toBe(true) // cleanup requested the close...
+
+  // ...but since close() is async in reality, the stale socket's handler
+  // is still technically reachable for a window — a late message on it
+  // must not be treated as a real match by the hook's current instance.
+  act(() => {
+    staleWs.onmessage?.({ data: JSON.stringify({ type: 'MATCH_FOUND', sessionId: 'stale', opponentId: 'x', wsUrl: 'ws://stale' }) })
+  })
+  expect(result.current.status).not.toBe('matched')
+
+  act(() => {
+    newWs.onmessage?.({ data: JSON.stringify({ type: 'MATCH_FOUND', sessionId: 'real', opponentId: 'y', wsUrl: 'ws://real' }) })
+  })
+  expect(result.current.status).toBe('matched')
+  expect(result.current.match?.sessionId).toBe('real')
 })
