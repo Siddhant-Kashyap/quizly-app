@@ -1098,7 +1098,7 @@ this task assumes (a `pickRandomOpponent()` import, a `useEffect` with a
 
 Replace `app/app/(quiz)/matchmaking.tsx` entirely:
 ```tsx
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { View } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated'
@@ -1138,6 +1138,7 @@ export default function Matchmaking() {
   const { topic } = useLocalSearchParams<{ topic: string }>()
   const { user } = useAuth()
   const { status, match, error, cancel } = useMatchmaking(topic, user?.id ?? null)
+  const [profileError, setProfileError] = useState<string | null>(null)
 
   useEffect(() => {
     if (status !== 'matched' || !match) return
@@ -1150,6 +1151,9 @@ export default function Matchmaking() {
           `&opponentName=${encodeURIComponent(profile.username)}&wsUrl=${encodeURIComponent(match.wsUrl)}`,
         )
       })
+      .catch(() => {
+        if (!cancelled) setProfileError('Could not load your opponent. Please try again.')
+      })
     return () => { cancelled = true }
   }, [status, match, topic])
 
@@ -1157,6 +1161,8 @@ export default function Matchmaking() {
     cancel()
     router.back()
   }
+
+  const isError = status === 'error' || profileError !== null
 
   return (
     <View className="flex-1 bg-void items-center justify-center px-8">
@@ -1169,15 +1175,15 @@ export default function Matchmaking() {
       </View>
 
       <Text variant="title" className="text-white mb-2">
-        {status === 'error' ? 'Something went wrong' : 'Finding an opponent…'}
+        {isError ? 'Something went wrong' : 'Finding an opponent…'}
       </Text>
       <Text variant="body" className="text-white/50 text-center mb-10">
-        {status === 'error'
-          ? (error ?? 'Could not connect to matchmaking. Please try again.')
+        {isError
+          ? (profileError ?? error ?? 'Could not connect to matchmaking. Please try again.')
           : 'Matching you with a random player for a head-to-head battle.'}
       </Text>
 
-      <Button label={status === 'error' ? 'Back' : 'Cancel'} variant="ghost" onPress={handleCancel} />
+      <Button label={isError ? 'Back' : 'Cancel'} variant="ghost" onPress={handleCancel} />
     </View>
   )
 }
