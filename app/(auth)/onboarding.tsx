@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { Zap, Atom, Landmark, Rocket, Cpu, Leaf, Film, Check } from 'lucide-react-native'
 import { Text, Button } from '@/shared/components'
 import { useOnboardingStore } from '@/features/onboarding/store'
-import { MOCK_TOPICS } from '@/shared/lib/mockData'
+import { ONBOARDING_TOPICS } from '@/shared/lib/mockData'
 import { colors, gradients } from '@/shared/theme/colors'
 
 const ICONS: Record<string, typeof Atom> = { Atom, Landmark, Rocket, Cpu, Leaf, Film }
@@ -91,7 +91,7 @@ export default function Onboarding() {
           >
             <Zap size={40} color={colors.white} fill={colors.white} />
           </LinearGradient>
-          <Text variant="display" className="text-cyan mb-2">Quizly</Text>
+          <Text variant="display" className="text-cyan mb-2">Factora</Text>
           <Text variant="caption" className="text-white/50" style={{ letterSpacing: 3 }}>
             SCROLL · LEARN · COMPETE
           </Text>
@@ -127,8 +127,8 @@ export default function Onboarding() {
 
           <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 340 }}>
             <View className="flex-row flex-wrap" style={{ gap: 12 }}>
-              {MOCK_TOPICS.map((topic) => {
-                const Icon = ICONS[topic.icon]
+              {ONBOARDING_TOPICS.map((topic) => {
+                const Icon = ICONS[topic.iconUrl]
                 const isSelected = selectedTopics.includes(topic.slug)
                 return (
                   <Pressable

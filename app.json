@@ -1,13 +1,14 @@
 {
   "expo": {
-    "name": "Quizly",
-    "slug": "quizly",
+    "name": "Factora",
+    "slug": "factora",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "quizly",
+    "scheme": "factora",
     "userInterfaceStyle": "dark",
     "android": {
-      "package": "com.quizly.app",
+      "package": "com.factora.app",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#050514"
       }
@@ -15,7 +16,10 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-splash-screen"
+      "expo-splash-screen",
+      "@react-native-google-signin/google-signin",
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth"
     ]
   }
 }
