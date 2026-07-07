@@ -4,17 +4,19 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { Trophy, Frown, Handshake } from 'lucide-react-native'
 import { Text, Button } from '@/shared/components'
 import { useQuizStore } from '@/features/quiz/store'
+import { useAuth } from '@/features/auth/hooks/useAuth'
 import { colors, gradients } from '@/shared/theme/colors'
 
 export default function Reward() {
-  const { session, score, xpEarned, opponentScore, answers, endSession } = useQuizStore()
+  const { session, score, xpEarned, opponentScore, winnerId, answers, endSession } = useQuizStore()
+  const { user } = useAuth()
   const totalAnswered = Object.keys(answers).length
   const correctCount = score / 10
   const accuracy = totalAnswered > 0 ? Math.round((correctCount / totalAnswered) * 100) : 0
 
   const isPvp = session?.mode === 'p2p'
-  const opponentName = session?.opponentId ?? 'Opponent'
-  const outcome = score > opponentScore ? 'win' : score < opponentScore ? 'lose' : 'draw'
+  const opponentName = session?.opponentName ?? 'Opponent'
+  const outcome = winnerId === user?.id ? 'win' : winnerId === '' ? 'draw' : 'lose'
 
   const handleDone = () => {
     endSession()
