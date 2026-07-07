@@ -272,7 +272,8 @@ since its existing `addScore(10)`/`addOpponentScore(10)` increment-style
 API assumes solo mode's fixed-10-points-per-question convention, which
 doesn't apply to pvp's server-authoritative absolute scores. It also
 gains one new field, `winnerId: string` (default `''`), alongside the
-existing `score`/`opponentScore`/`xpEarned`:
+existing `score`/`opponentScore`/`xpEarned` — reset to `''` in `setSession`/`endSession`
+the same way those existing fields already reset to `0`, for symmetry:
 
 ```ts
 setPvpResult: (score: number, opponentScore: number, xpEarned: number, winnerId: string) => void
