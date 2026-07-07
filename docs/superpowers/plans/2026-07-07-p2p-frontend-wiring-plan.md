@@ -569,7 +569,7 @@ export function useMatchmaking(topic: string, playerId: string | null) {
 
     ws.onopen = () => setStatus('waiting')
     ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data as string)
+      const msg = JSON.parse(e.data as string) as MatchFoundMessage
       if (msg.type === 'MATCH_FOUND') {
         setMatch(msg)
         setStatus('matched')
@@ -756,6 +756,7 @@ Create `app/src/features/quiz/hooks/usePvpGameplay.ts`:
 ```ts
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Question } from '@/shared/types'
+import { GameplayMessage } from './wsProtocol'
 
 interface PvpGameplayState {
   question: Question | null
@@ -799,7 +800,7 @@ export function usePvpGameplay(wsUrl: string | null, myPlayerId: string, opponen
     wsRef.current = ws
 
     ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data as string)
+      const msg = JSON.parse(e.data as string) as GameplayMessage
       switch (msg.type) {
         case 'QUESTION_START':
           setState((s) => ({
