@@ -73,8 +73,13 @@ in `user/dto/`. Backed by `UserRepository.findById` (already available,
 `UserService` method does the lookup and throws
 `ResponseStatusException(HttpStatus.NOT_FOUND)` if absent — `GlobalExceptionHandler`
 only maps `IllegalArgumentException`→400 and generic `RuntimeException`→500,
-neither of which is the right status for "not found", so this bypasses
-that handler entirely with Spring's own `ResponseStatusException`. Works
+neither of which is the right status for "not found". `ResponseStatusException`
+is itself a `RuntimeException`, though, so the existing catch-all would
+actually intercept it and force a 500 unless `GlobalExceptionHandler`
+also gets an explicit handler for it (added as part of this same change,
+returning `ex.getStatusCode()`/`ex.getReason()` — Spring's exception
+handler resolution picks the most specific match within one advice
+class, no ordering annotation needed). Works
 identically for guest opponents — `AuthService.loginAsGuest` already sets
 a real `username` (`"Guest_xxxxxx"`) for every guest, so a guest-vs-guest
 match still gets a real name.
