@@ -5,6 +5,7 @@ import { useAuthStore } from '../store'
 import { useProfileStore } from '@/features/profile/store'
 import { api } from '@/shared/lib/api'
 import * as googleSignIn from '../lib/googleSignIn'
+import { GUEST_CARDS_VIEWED_KEY } from '@/features/feed/hooks/useGuestCardLimit'
 
 jest.mock('@/shared/lib/api', () => ({
   api: { post: jest.fn() },
@@ -37,7 +38,7 @@ test('mergeGuestIntoGoogle posts /auth/merge with the current guestId and logs i
 
 test('mergeGuestIntoGoogle clears the profile store and the card-view counter on success', async () => {
   useProfileStore.setState({ profile: { userId: 'guest-abc' } as never })
-  await AsyncStorage.setItem('factora.guestCardsViewed', JSON.stringify(['c1', 'c2']))
+  await AsyncStorage.setItem(GUEST_CARDS_VIEWED_KEY, JSON.stringify(['c1', 'c2']))
   ;(googleSignIn.signInWithGoogle as jest.Mock).mockResolvedValue('fake-id-token')
   ;(api.post as jest.Mock).mockResolvedValue({ jwt: 'new-jwt', user: { ...mockUser, isGuest: false } })
 
@@ -45,7 +46,7 @@ test('mergeGuestIntoGoogle clears the profile store and the card-view counter on
   await act(async () => { await result.current.mergeGuestIntoGoogle() })
 
   expect(useProfileStore.getState().profile).toBeNull()
-  expect(await AsyncStorage.getItem('factora.guestCardsViewed')).toBeNull()
+  expect(await AsyncStorage.getItem(GUEST_CARDS_VIEWED_KEY)).toBeNull()
 })
 
 test('mergeGuestIntoGoogle returns false without calling the API if the picker was cancelled', async () => {

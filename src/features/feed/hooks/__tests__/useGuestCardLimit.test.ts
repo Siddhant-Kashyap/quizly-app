@@ -46,3 +46,19 @@ test('persists the viewed count across a remount (AsyncStorage)', async () => {
 
   await waitFor(() => expect(second.result.current.isBlocked).toBe(true))
 })
+
+test('a recordView call that lands before the initial AsyncStorage load resolves does not lose either side\'s data', async () => {
+  await AsyncStorage.setItem('factora.guestCardsViewed', JSON.stringify(['old-card-1', 'old-card-2']))
+  const { result } = renderHook(() => useGuestCardLimit())
+
+  // Call recordView synchronously, before the mount effect's AsyncStorage.getItem has resolved.
+  act(() => { result.current.recordView('new-card') })
+
+  // Once everything settles, both the pre-existing disk history AND the
+  // new view recorded before the load finished must both be present.
+  await waitFor(async () => {
+    const raw = await AsyncStorage.getItem('factora.guestCardsViewed')
+    const stored = JSON.parse(raw ?? '[]')
+    expect(stored).toEqual(expect.arrayContaining(['old-card-1', 'old-card-2', 'new-card']))
+  })
+})

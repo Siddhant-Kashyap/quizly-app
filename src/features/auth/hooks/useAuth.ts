@@ -4,6 +4,7 @@ import { useProfileStore } from '@/features/profile/store'
 import { api } from '@/shared/lib/api'
 import { AuthResponse } from '@/shared/types'
 import { signInWithGoogle as signInWithGoogleNative } from '../lib/googleSignIn'
+import { GUEST_CARDS_VIEWED_KEY } from '@/features/feed/hooks/useGuestCardLimit'
 
 function generateGuestId() {
   return `guest_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
@@ -49,7 +50,7 @@ export function useAuth() {
     useProfileStore.getState().clearProfile() // fresh (possibly merged) account — refetch, don't show stale guest data
     // Best-effort cleanup: this is non-essential bookkeeping, so a failure here must not
     // undo or misrepresent the already-successful auth state change above.
-    await AsyncStorage.removeItem('factora.guestCardsViewed').catch(() => {}) // fresh account, no more guest caps
+    await AsyncStorage.removeItem(GUEST_CARDS_VIEWED_KEY).catch(() => {}) // fresh account, no more guest caps
     return true
   }
 
