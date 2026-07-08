@@ -85,6 +85,33 @@ test('mergeGuestIntoGoogle does not log in if the /auth/merge call itself reject
   expect(useAuthStore.getState().isGuest).toBe(true) // unchanged — login() never ran
 })
 
+test('mergeGuestIntoGoogle reads guestId live, not a value captured at render time', async () => {
+  let resolvePicker: (idToken: string) => void
+  ;(googleSignIn.signInWithGoogle as jest.Mock).mockReturnValue(
+    new Promise<string>((resolve) => { resolvePicker = resolve }),
+  )
+  ;(api.post as jest.Mock).mockResolvedValue({ jwt: 'new-jwt', user: { ...mockUser, isGuest: false } })
+
+  const { result } = renderHook(() => useAuth())
+
+  let merged: boolean = false
+  const mergePromise = act(async () => { merged = await result.current.mergeGuestIntoGoogle() })
+  // Let mergeGuestIntoGoogle actually start running and suspend on the
+  // `await signInWithGoogleNative()` call before we touch the store.
+  await Promise.resolve()
+  await Promise.resolve()
+  // While the picker is still "open," something else changes the store's
+  // guestId — e.g. a concurrent effect elsewhere in the app. A stale
+  // closure read (captured before this happened) would still use the OLD
+  // guestId; a live read picks up this new one.
+  useAuthStore.setState({ guestId: 'guest-changed-mid-flow' })
+  resolvePicker!('fake-id-token')
+  await mergePromise
+
+  expect(merged).toBe(true)
+  expect(api.post).toHaveBeenCalledWith('/auth/merge', { guestId: 'guest-changed-mid-flow', idToken: 'fake-id-token' })
+})
+
 test('mergeGuestIntoGoogle does not reject if clearing the card-view counter fails', async () => {
   ;(googleSignIn.signInWithGoogle as jest.Mock).mockResolvedValue('fake-id-token')
   ;(api.post as jest.Mock).mockResolvedValue({ jwt: 'new-jwt', user: { ...mockUser, isGuest: false } })
