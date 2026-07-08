@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { View, Pressable, ScrollView } from 'react-native'
 import { router } from 'expo-router'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -12,26 +12,31 @@ import { colors, gradients } from '@/shared/theme/colors'
 export default function QuizHub() {
   const { topics } = useCategories()
   const checkEligibility = useQuizEligibility()
-  const [isNavigating, setIsNavigating] = useState(false)
+  const isNavigatingRef = useRef(false)
+  const [isNavigating, setIsNavigating] = useState(false) // drives `disabled` only
 
   const startPvp = async () => {
-    if (isNavigating) return
+    if (isNavigatingRef.current) return
+    isNavigatingRef.current = true
     setIsNavigating(true)
     try {
       const allowed = await checkEligibility('p2p')
       router.push(allowed ? '/(quiz)/matchmaking?topic=all' : '/(quiz)/limit-wall?feature=pvp')
     } finally {
+      isNavigatingRef.current = false
       setIsNavigating(false)
     }
   }
 
   const startSolo = async (topic: string) => {
-    if (isNavigating) return
+    if (isNavigatingRef.current) return
+    isNavigatingRef.current = true
     setIsNavigating(true)
     try {
       const allowed = await checkEligibility('solo')
       router.push(allowed ? `/(quiz)/${topic}` : '/(quiz)/limit-wall?feature=solo')
     } finally {
+      isNavigatingRef.current = false
       setIsNavigating(false)
     }
   }
