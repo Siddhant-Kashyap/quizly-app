@@ -18,8 +18,10 @@ implemented and working — this spec only adds the merge path.
 ### In scope
 - Three guest limits: 1 completed PvP match, 5 completed solo quizzes,
   10 feed cards viewed (lifetime, client-tracked)
-- A new Spring endpoint, `GET /quiz/eligibility`, as the single check point
-  for the two server-tracked limits (solo, PvP)
+- A new Spring endpoint, `GET /quiz/eligibility`, called by the frontend
+  before starting either a solo or PvP quiz — for solo it's a proactive
+  precheck backed by real server-side enforcement inside `startSolo`; for
+  PvP it's the entire (soft, client-side-only) gate, see §2
 - A new full-screen "sign in to continue" wall, shown instead of the
   blocked feature, whose only action is Google Sign-In
 - Implementing `POST /auth/merge` (currently a stub) to fold a guest's
@@ -133,7 +135,11 @@ export function useQuizEligibility() {
 ```
 
 If `allowed` is `false`, navigate to a new route (`/(quiz)/limit-wall?feature=solo|pvp`)
-instead of the quiz/matchmaking screen. If the eligibility call itself
+instead of the quiz/matchmaking screen. Note `feature` here is a distinct,
+UI-copy-only identifier (matching the "PvP Battle" label users see) — it's
+never passed into the eligibility call, so it's unrelated to the `mode`
+param's `"p2p"` spelling above; don't conflate the two when implementing.
+If the eligibility call itself
 fails (network error), fail open (treat as allowed) — a guest limit isn't
 worth blocking the whole app over a flaky request. (For solo quiz this is
 just a UX nicety, since `startSolo` enforces the real limit server-side
