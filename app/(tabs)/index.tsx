@@ -1,16 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { View, Pressable, useWindowDimensions } from 'react-native'
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated'
 import { X } from 'lucide-react-native'
 import { Skeleton, Text } from '@/shared/components'
 import { FactCard } from '@/features/feed/components/FactCard'
 import { useFeed } from '@/features/feed/hooks/useFeed'
+import { useGuestCardLimit } from '@/features/feed/hooks/useGuestCardLimit'
+import { useCategories } from '@/features/explore/hooks/useCategories'
+import { GuestLimitWall } from '@/features/auth/components/GuestLimitWall'
 import { FactCard as FactCardType } from '@/shared/types'
-import { MOCK_TOPICS } from '@/shared/lib/mockData'
 import { colors } from '@/shared/theme/colors'
 
 export default function Home() {
   const { cards, currentTopic, isLoading, fetchCards } = useFeed()
+  const { topics } = useCategories()
+  const { isBlocked, recordView } = useGuestCardLimit()
   const [containerHeight, setContainerHeight] = useState(0)
   const { height } = useWindowDimensions()
   const scrollY = useSharedValue(0)
@@ -19,12 +23,23 @@ export default function Home() {
     scrollY.value = e.contentOffset.y
   })
 
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: { item: FactCardType }[] }) => {
+      viewableItems.forEach((vi) => recordView(vi.item.id))
+    },
+  ).current
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current
+
   useEffect(() => {
     fetchCards(currentTopic)
   }, [currentTopic])
 
   const pageHeight = containerHeight || height
-  const activeTopic = MOCK_TOPICS.find((t) => t.slug === currentTopic)
+  const activeTopic = topics.find((t) => t.slug === currentTopic)
+
+  if (isBlocked) {
+    return <GuestLimitWall feature="cards" />
+  }
 
   return (
     <View
@@ -55,7 +70,7 @@ export default function Home() {
           keyExtractor={(item) => item.id}
           renderItem={({ item, index }: { item: FactCardType; index: number }) => (
             <View style={{ height: pageHeight }}>
-              <FactCard card={item} progress={(index + 1) / cards.length} index={index} scrollY={scrollY} pageHeight={pageHeight} />
+              <FactCard card={item} topics={topics} progress={(index + 1) / cards.length} index={index} scrollY={scrollY} pageHeight={pageHeight} />
             </View>
           )}
           pagingEnabled
@@ -64,6 +79,8 @@ export default function Home() {
           decelerationRate="fast"
           onScroll={scrollHandler}
           scrollEventThrottle={16}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
           getItemLayout={(_, index) => ({ length: pageHeight, offset: pageHeight * index, index })}
         />
       )}
