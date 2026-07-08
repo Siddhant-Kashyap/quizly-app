@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useAuthStore } from '../store'
 import { useProfileStore } from '@/features/profile/store'
 import { api } from '@/shared/lib/api'
@@ -26,6 +27,27 @@ export function useAuth() {
     return true
   }
 
+  // Guest→Google merge: reuses the same native Google Sign-In step as
+  // signInWithGoogle, but exchanges the ID token via /auth/merge instead of
+  // /auth/google, so the guest's progress carries over instead of starting
+  // a fresh empty account. Only ever called from a guest session's limit
+  // wall (see GuestLimitWall.tsx, added in a later task) — falls back to a
+  // plain /auth/google call if there's somehow no guestId in the store,
+  // which keeps this safe to call generally even though that shouldn't
+  // happen given the call site.
+  const mergeGuestIntoGoogle = async (): Promise<boolean> => {
+    const idToken = await signInWithGoogleNative()
+    if (!idToken) return false
+    const guestId = store.guestId
+    const response = guestId
+      ? await api.post<AuthResponse>('/auth/merge', { guestId, idToken })
+      : await api.post<AuthResponse>('/auth/google', { idToken })
+    store.login(response.user, response.jwt)
+    useProfileStore.getState().clearProfile() // fresh (possibly merged) account — refetch, don't show stale guest data
+    await AsyncStorage.removeItem('factora.guestCardsViewed') // fresh account, no more guest caps
+    return true
+  }
+
   const loginAsGuest = async (guestId: string = generateGuestId()) => {
     const response = await api.post<AuthResponse>('/auth/guest', { guestId })
     store.login(response.user, response.jwt)
@@ -37,5 +59,5 @@ export function useAuth() {
     useProfileStore.getState().clearProfile()
   }
 
-  return { ...store, loginWithGoogle, signInWithGoogle, loginAsGuest, logout }
+  return { ...store, loginWithGoogle, signInWithGoogle, mergeGuestIntoGoogle, loginAsGuest, logout }
 }
