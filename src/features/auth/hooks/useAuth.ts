@@ -38,13 +38,18 @@ export function useAuth() {
   const mergeGuestIntoGoogle = async (): Promise<boolean> => {
     const idToken = await signInWithGoogleNative()
     if (!idToken) return false
-    const guestId = store.guestId
+    const guestId = useAuthStore.getState().guestId
+    if (!guestId) {
+      console.warn('mergeGuestIntoGoogle called with no guestId in the store — falling back to a plain Google login. This should not happen: guestId should only be missing if isGuest is also false.')
+    }
     const response = guestId
       ? await api.post<AuthResponse>('/auth/merge', { guestId, idToken })
       : await api.post<AuthResponse>('/auth/google', { idToken })
     store.login(response.user, response.jwt)
     useProfileStore.getState().clearProfile() // fresh (possibly merged) account — refetch, don't show stale guest data
-    await AsyncStorage.removeItem('factora.guestCardsViewed') // fresh account, no more guest caps
+    // Best-effort cleanup: this is non-essential bookkeeping, so a failure here must not
+    // undo or misrepresent the already-successful auth state change above.
+    await AsyncStorage.removeItem('factora.guestCardsViewed').catch(() => {}) // fresh account, no more guest caps
     return true
   }
 

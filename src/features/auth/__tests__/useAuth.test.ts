@@ -58,3 +58,43 @@ test('mergeGuestIntoGoogle returns false without calling the API if the picker w
   expect(merged).toBe(false)
   expect(api.post).not.toHaveBeenCalled()
 })
+
+test('mergeGuestIntoGoogle warns and falls back to /auth/google if there is no guestId in the store', async () => {
+  useAuthStore.setState({ user: null, isGuest: false, token: null, guestId: null })
+  const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+  ;(googleSignIn.signInWithGoogle as jest.Mock).mockResolvedValue('fake-id-token')
+  ;(api.post as jest.Mock).mockResolvedValue({ jwt: 'new-jwt', user: { ...mockUser, isGuest: false } })
+
+  const { result } = renderHook(() => useAuth())
+  let merged: boolean = false
+  await act(async () => { merged = await result.current.mergeGuestIntoGoogle() })
+
+  expect(merged).toBe(true)
+  expect(api.post).toHaveBeenCalledWith('/auth/google', { idToken: 'fake-id-token' })
+  expect(warnSpy).toHaveBeenCalled()
+  warnSpy.mockRestore()
+})
+
+test('mergeGuestIntoGoogle does not log in if the /auth/merge call itself rejects', async () => {
+  ;(googleSignIn.signInWithGoogle as jest.Mock).mockResolvedValue('fake-id-token')
+  ;(api.post as jest.Mock).mockRejectedValue({ status: 400, message: 'Unknown guestId' })
+
+  const { result } = renderHook(() => useAuth())
+  await expect(result.current.mergeGuestIntoGoogle()).rejects.toBeTruthy()
+
+  expect(useAuthStore.getState().isGuest).toBe(true) // unchanged — login() never ran
+})
+
+test('mergeGuestIntoGoogle does not reject if clearing the card-view counter fails', async () => {
+  ;(googleSignIn.signInWithGoogle as jest.Mock).mockResolvedValue('fake-id-token')
+  ;(api.post as jest.Mock).mockResolvedValue({ jwt: 'new-jwt', user: { ...mockUser, isGuest: false } })
+  const removeItemSpy = jest.spyOn(AsyncStorage, 'removeItem').mockRejectedValue(new Error('storage full'))
+
+  const { result } = renderHook(() => useAuth())
+  let merged: boolean = false
+  await act(async () => { merged = await result.current.mergeGuestIntoGoogle() })
+
+  expect(merged).toBe(true) // still succeeds — the user IS logged in
+  expect(useAuthStore.getState().isGuest).toBe(false)
+  removeItemSpy.mockRestore()
+})
