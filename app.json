@@ -6,17 +6,31 @@
     "orientation": "portrait",
     "scheme": "factora",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
     "android": {
       "package": "com.factora.app",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "backgroundColor": "#050514"
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#050514",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
       }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#050514"
+        }
+      ],
       "@react-native-google-signin/google-signin",
       "@react-native-firebase/app",
       "@react-native-firebase/auth"
