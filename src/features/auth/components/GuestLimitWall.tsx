@@ -6,6 +6,11 @@ import { Lock } from 'lucide-react-native'
 import { Text, Button } from '@/shared/components'
 import { useAuth } from '../hooks/useAuth'
 import { colors, gradients } from '@/shared/theme/colors'
+import { ApiError } from '@/shared/types'
+
+function isApiError(e: unknown): e is ApiError {
+  return typeof e === 'object' && e !== null && 'status' in e && 'message' in e
+}
 
 type LimitFeature = 'solo' | 'pvp' | 'cards'
 
@@ -24,18 +29,27 @@ const COPY: Record<LimitFeature, { title: string; body: string }> = {
   },
 }
 
-export function GuestLimitWall({ feature }: { feature: LimitFeature }) {
+export function GuestLimitWall({ feature, onSignedIn }: { feature: LimitFeature; onSignedIn?: () => void }) {
   const { mergeGuestIntoGoogle } = useAuth()
   const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
   const copy = COPY[feature]
 
   const handleSignIn = async () => {
     setError(null)
+    setIsLoading(true)
     try {
       const merged = await mergeGuestIntoGoogle()
-      if (merged) router.replace('/(tabs)')
+      if (merged) {
+        if (onSignedIn) onSignedIn()
+        else router.replace('/(tabs)')
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sign-in failed. Please try again.')
+      if (e instanceof Error) setError(e.message)
+      else if (isApiError(e)) setError(e.message || `Request failed (${e.status})`)
+      else setError('Sign-in failed. Please try again.')
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -56,7 +70,11 @@ export function GuestLimitWall({ feature }: { feature: LimitFeature }) {
         <Text variant="caption" className="text-red-400 text-center mb-4">{error}</Text>
       )}
 
-      <Button label="Sign in with Google" onPress={handleSignIn} />
+      <Button
+        label={isLoading ? 'Signing in…' : 'Sign in with Google'}
+        onPress={handleSignIn}
+        disabled={isLoading}
+      />
     </View>
   )
 }
