@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react-native'
+import { act, renderHook, waitFor } from '@testing-library/react-native'
 import { useAuthStore } from '../store'
 
 beforeEach(() => {
@@ -18,4 +18,12 @@ test('logout clears all auth state', () => {
   act(() => result.current.logout())
   expect(result.current.isGuest).toBe(false)
   expect(result.current.guestId).toBeNull()
+})
+
+test('setHasHydrated updates hasHydrated', async () => {
+  const { result } = renderHook(() => useAuthStore())
+  act(() => result.current.setHasHydrated(true))
+  await waitFor(() => expect(result.current.hasHydrated).toBe(true))
+  act(() => result.current.setHasHydrated(false))
+  await waitFor(() => expect(result.current.hasHydrated).toBe(false))
 })

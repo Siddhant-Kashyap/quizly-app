@@ -7,6 +7,7 @@ const LIMIT = 10
 
 export function useGuestCardLimit() {
   const isGuest = useAuthStore((s) => s.isGuest)
+  const hasHydrated = useAuthStore((s) => s.hasHydrated)
   const [viewedIds, setViewedIds] = useState<string[]>([])
   const [loaded, setLoaded] = useState(false)
 
@@ -42,5 +43,9 @@ export function useGuestCardLimit() {
     })
   }, [isGuest])
 
-  return { isBlocked: isGuest && viewedIds.length >= LIMIT, recordView }
+  return {
+    isBlocked: isGuest && viewedIds.length >= LIMIT,
+    isReady: hasHydrated && loaded,
+    recordView,
+  }
 }

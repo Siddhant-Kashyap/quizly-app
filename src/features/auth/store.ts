@@ -9,9 +9,11 @@ interface AuthState {
   isGuest: boolean
   token: string | null
   guestId: string | null
+  hasHydrated: boolean
   login: (user: User, token: string) => void
   logout: () => void
   continueAsGuest: (guestId: string) => void
+  setHasHydrated: (value: boolean) => void
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -21,6 +23,7 @@ export const useAuthStore = create<AuthState>()(
       isGuest: false,
       token: null,
       guestId: null,
+      hasHydrated: false,
       login: (user, token) => {
         setAuthToken(token)
         set({ user, token, isGuest: false, guestId: null })
@@ -34,6 +37,7 @@ export const useAuthStore = create<AuthState>()(
         setGuestId(guestId)
         set({ isGuest: true, guestId })
       },
+      setHasHydrated: (value) => set({ hasHydrated: value }),
     }),
     {
       name: 'quizly.auth',
@@ -47,6 +51,7 @@ export const useAuthStore = create<AuthState>()(
         if (!state) return
         setAuthToken(state.token)
         setGuestId(state.guestId)
+        state.setHasHydrated(true)
       },
     },
   ),

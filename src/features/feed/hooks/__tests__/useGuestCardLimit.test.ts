@@ -5,7 +5,7 @@ import { useAuthStore } from '@/features/auth/store'
 
 beforeEach(async () => {
   await AsyncStorage.clear()
-  useAuthStore.setState({ isGuest: true })
+  useAuthStore.setState({ isGuest: true, hasHydrated: true })
 })
 
 test('is not blocked below the limit, and ignores non-guests entirely', async () => {
@@ -61,4 +61,14 @@ test('a recordView call that lands before the initial AsyncStorage load resolves
     const stored = JSON.parse(raw ?? '[]')
     expect(stored).toEqual(expect.arrayContaining(['old-card-1', 'old-card-2', 'new-card']))
   })
+})
+
+test('isReady is false until both auth hydration and the initial AsyncStorage load complete', async () => {
+  useAuthStore.setState({ isGuest: true, hasHydrated: false })
+  const { result } = renderHook(() => useGuestCardLimit())
+
+  expect(result.current.isReady).toBe(false)
+
+  useAuthStore.setState({ hasHydrated: true })
+  await waitFor(() => expect(result.current.isReady).toBe(true))
 })

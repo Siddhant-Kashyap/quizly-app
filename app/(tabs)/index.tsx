@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { View, Pressable, useWindowDimensions } from 'react-native'
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated'
 import { X } from 'lucide-react-native'
@@ -14,7 +14,7 @@ import { colors } from '@/shared/theme/colors'
 export default function Home() {
   const { cards, currentTopic, isLoading, fetchCards } = useFeed()
   const { topics } = useCategories()
-  const { isBlocked, recordView } = useGuestCardLimit()
+  const { isBlocked, isReady, recordView } = useGuestCardLimit()
   const [containerHeight, setContainerHeight] = useState(0)
   const { height } = useWindowDimensions()
   const scrollY = useSharedValue(0)
@@ -28,16 +28,16 @@ export default function Home() {
       viewableItems.forEach((vi) => recordView(vi.item.id))
     },
   ).current
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 90, minimumViewTime: 300 }).current
 
   useEffect(() => {
-    fetchCards(currentTopic)
-  }, [currentTopic])
+    if (isReady && !isBlocked) fetchCards(currentTopic)
+  }, [currentTopic, isReady, isBlocked])
 
   const pageHeight = containerHeight || height
   const activeTopic = topics.find((t) => t.slug === currentTopic)
 
-  if (isBlocked) {
+  if (isReady && isBlocked) {
     return <GuestLimitWall feature="cards" />
   }
 
@@ -57,7 +57,7 @@ export default function Home() {
         </Pressable>
       )}
 
-      {isLoading || containerHeight === 0 ? (
+      {!isReady || isLoading || containerHeight === 0 ? (
         <View className="flex-1 justify-center px-6" style={{ gap: 16 }}>
           <Skeleton height={28} width="60%" />
           <Skeleton height={120} />
