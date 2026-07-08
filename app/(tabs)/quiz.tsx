@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { View, Pressable, ScrollView } from 'react-native'
 import { router } from 'expo-router'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -11,15 +12,28 @@ import { colors, gradients } from '@/shared/theme/colors'
 export default function QuizHub() {
   const { topics } = useCategories()
   const checkEligibility = useQuizEligibility()
+  const [isNavigating, setIsNavigating] = useState(false)
 
   const startPvp = async () => {
-    const allowed = await checkEligibility('p2p')
-    router.push(allowed ? '/(quiz)/matchmaking?topic=all' : '/(quiz)/limit-wall?feature=pvp')
+    if (isNavigating) return
+    setIsNavigating(true)
+    try {
+      const allowed = await checkEligibility('p2p')
+      router.push(allowed ? '/(quiz)/matchmaking?topic=all' : '/(quiz)/limit-wall?feature=pvp')
+    } finally {
+      setIsNavigating(false)
+    }
   }
 
   const startSolo = async (topic: string) => {
-    const allowed = await checkEligibility('solo')
-    router.push(allowed ? `/(quiz)/${topic}` : '/(quiz)/limit-wall?feature=solo')
+    if (isNavigating) return
+    setIsNavigating(true)
+    try {
+      const allowed = await checkEligibility('solo')
+      router.push(allowed ? `/(quiz)/${topic}` : '/(quiz)/limit-wall?feature=solo')
+    } finally {
+      setIsNavigating(false)
+    }
   }
 
   return (
@@ -28,7 +42,7 @@ export default function QuizHub() {
       <Text variant="body" className="text-white/50 mb-6">Play solo at your pace, or battle a random opponent.</Text>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        <Pressable onPress={startPvp}>
+        <Pressable onPress={startPvp} disabled={isNavigating}>
           <LinearGradient
             colors={gradients.accent}
             start={{ x: 0, y: 0 }}
@@ -50,6 +64,7 @@ export default function QuizHub() {
 
         <Pressable
           onPress={() => startSolo('all')}
+          disabled={isNavigating}
           className="bg-iris/20 rounded-2xl p-5 mb-6 flex-row items-center justify-between"
           style={{ borderWidth: 1, borderColor: colors.iris }}
         >
@@ -68,6 +83,7 @@ export default function QuizHub() {
           <Pressable
             key={topic.slug}
             onPress={() => startSolo(topic.slug)}
+            disabled={isNavigating}
             className="bg-surface2 rounded-2xl p-4 mb-3 flex-row items-center justify-between"
           >
             <Text variant="heading" style={{ color: colors[TOPIC_COLORS[topic.slug] ?? DEFAULT_TOPIC_COLOR] }}>{topic.label}</Text>
