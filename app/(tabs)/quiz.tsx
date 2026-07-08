@@ -3,17 +3,32 @@ import { router } from 'expo-router'
 import { LinearGradient } from 'expo-linear-gradient'
 import { ChevronRight, Zap, Swords } from 'lucide-react-native'
 import { Text } from '@/shared/components'
-import { MOCK_TOPICS } from '@/shared/lib/mockData'
-import { colors, ColorToken, gradients } from '@/shared/theme/colors'
+import { useCategories } from '@/features/explore/hooks/useCategories'
+import { useQuizEligibility } from '@/features/quiz/hooks/useQuizEligibility'
+import { TOPIC_COLORS, DEFAULT_TOPIC_COLOR } from '@/shared/lib/topicColors'
+import { colors, gradients } from '@/shared/theme/colors'
 
 export default function QuizHub() {
+  const { topics } = useCategories()
+  const checkEligibility = useQuizEligibility()
+
+  const startPvp = async () => {
+    const allowed = await checkEligibility('p2p')
+    router.push(allowed ? '/(quiz)/matchmaking?topic=all' : '/(quiz)/limit-wall?feature=pvp')
+  }
+
+  const startSolo = async (topic: string) => {
+    const allowed = await checkEligibility('solo')
+    router.push(allowed ? `/(quiz)/${topic}` : '/(quiz)/limit-wall?feature=solo')
+  }
+
   return (
     <View className="flex-1 bg-void px-6 pt-16">
       <Text variant="display" className="text-white mb-1">Quiz Hub</Text>
       <Text variant="body" className="text-white/50 mb-6">Play solo at your pace, or battle a random opponent.</Text>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        <Pressable onPress={() => router.push('/(quiz)/matchmaking?topic=all')}>
+        <Pressable onPress={startPvp}>
           <LinearGradient
             colors={gradients.accent}
             start={{ x: 0, y: 0 }}
@@ -34,7 +49,7 @@ export default function QuizHub() {
         </Pressable>
 
         <Pressable
-          onPress={() => router.push('/(quiz)/all')}
+          onPress={() => startSolo('all')}
           className="bg-iris/20 rounded-2xl p-5 mb-6 flex-row items-center justify-between"
           style={{ borderWidth: 1, borderColor: colors.iris }}
         >
@@ -49,13 +64,13 @@ export default function QuizHub() {
         </Pressable>
 
         <Text variant="heading" className="text-white/60 mb-3">Solo by Topic</Text>
-        {MOCK_TOPICS.map((topic) => (
+        {topics.map((topic) => (
           <Pressable
             key={topic.slug}
-            onPress={() => router.push(`/(quiz)/${topic.slug}`)}
+            onPress={() => startSolo(topic.slug)}
             className="bg-surface2 rounded-2xl p-4 mb-3 flex-row items-center justify-between"
           >
-            <Text variant="heading" style={{ color: colors[topic.color as ColorToken] }}>{topic.label}</Text>
+            <Text variant="heading" style={{ color: colors[TOPIC_COLORS[topic.slug] ?? DEFAULT_TOPIC_COLOR] }}>{topic.label}</Text>
             <ChevronRight size={18} color={colors.muted} />
           </Pressable>
         ))}
