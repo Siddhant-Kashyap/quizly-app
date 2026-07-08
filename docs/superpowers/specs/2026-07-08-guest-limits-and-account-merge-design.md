@@ -42,24 +42,27 @@ implemented and working — this spec only adds the merge path.
 
 ## 1. The three limits
 
-| Feature | Limit | Counted by | Tracked |
+| Feature | Limit | Counted by | Enforcement |
 |---|---|---|---|
-| Solo quiz | 5 completed | `QuizResult` rows with `mode='solo'` | Server (already exists) |
-| PvP quiz | 1 completed | `QuizResult` rows with `mode='p2p'` | Server (already exists) |
+| Solo quiz | 5 completed | `QuizResult` rows with `mode='solo'` | Server (real — guarded inside `startSolo`) |
+| PvP quiz | 1 completed | `QuizResult` rows with `mode='p2p'` (note: `'p2p'`, matching the existing convention everywhere else in the codebase — not `'pvp'`) | Client-side gate only (see §2) |
 | Feed cards | 10 viewed, lifetime | A card scrolling into view | Client only (AsyncStorage) |
 
-"Completed" means a finished match/quiz that produced a `QuizResult` row
-— abandoning a PvP match mid-game (disconnect/quit) does **not** use up
-the guest's one attempt, since no `QuizResult` is written for a match that
-never reaches `SESSION_END`. This falls out naturally from the existing
-data model; no new abandonment-tracking is needed.
+"Completed" counts **any** `QuizResult` row, including a mid-match
+disconnect/forfeit — a guest who quits or gets disconnected mid-PvP-match
+still uses up their one attempt, same as finishing normally. (The Go
+backend already writes a forfeit-scored `QuizResult` on disconnect via
+`handleDisconnect` → `saveP2PResult`, so this is simply "don't special-case
+it," not "this happens for free" — an earlier draft of this spec incorrectly
+claimed abandonment doesn't count; it does, and that's the intended
+behavior per product decision.)
 
 These limits only ever apply to `provider = 'guest'` accounts. A
 `provider = 'google'` user is never limited.
 
 ---
 
-## 2. Backend: `GET /quiz/eligibility`
+## 2. Backend: `GET /quiz/eligibility`, and where enforcement actually lives
 
 New endpoint on the existing `QuizController`
 (`spring/src/main/java/com/quizly/quiz/controller/QuizController.java`):
@@ -72,7 +75,9 @@ public ResponseEntity<EligibilityResponse> eligibility(
 }
 ```
 
-New DTO `EligibilityResponse(boolean allowed)`.
+New DTO `EligibilityResponse(boolean allowed)`. `mode` is `"solo"` or
+`"p2p"` — matching `QuizResult.mode`'s existing convention exactly, not a
+separate `"pvp"` spelling.
 
 New method on `QuizService`:
 
@@ -84,17 +89,30 @@ public EligibilityResponse checkEligibility(String userId, String mode) {
     long played = quizResultRepo.findByUserIdOrderByPlayedAtDesc(userId).stream()
             .filter(r -> mode.equals(r.getMode()))
             .count();
-    int limit = "pvp".equals(mode) ? 1 : 5; // solo
+    int limit = "p2p".equals(mode) ? 1 : 5; // solo
     return new EligibilityResponse(played < limit);
 }
 ```
 
-This is the single choke point for both server-tracked limits — even
-though solo quiz starts via a plain `POST /quiz/start` call and PvP starts
-by connecting straight to the Go matchmaking WebSocket (no Spring call in
-between), both flows call this same endpoint *before* doing either of
-those things, so the guard logic lives in one place regardless of how the
-actual quiz session mechanics differ afterward.
+**This endpoint alone is not real enforcement** — it's a voluntary
+pre-check the app calls before navigating; nothing stops a direct call to
+`/quiz/start` or the matchmaking WebSocket from skipping it. Per product
+decision, the two limits get different enforcement strength:
+
+- **Solo quiz is actually enforced server-side**: `QuizService.startSolo`
+  itself calls `checkEligibility` (reusing the same method) and throws
+  (→ 403) if not allowed, before creating a session. `GET /quiz/eligibility`
+  is still called first from the frontend too, purely so the app can show
+  the limit wall proactively instead of surfacing a raw 403 from a start
+  call the user already committed to.
+- **PvP is a soft, client-side-only gate**: matchmaking connects straight to
+  the Go service's `/matchmaking/ws` with no Spring call in between, so
+  real enforcement would require Go to call Spring before admitting a guest
+  to the queue. Per product decision this isn't worth the cross-service
+  complexity right now — the same accepted-risk trade-off as the card
+  limit. `GET /quiz/eligibility?mode=p2p` is only ever called from the
+  frontend before navigating to `matchmaking.tsx`; nothing on the Go side
+  checks it.
 
 ---
 
@@ -107,7 +125,7 @@ navigating, via a small new hook:
 ```ts
 // src/features/quiz/hooks/useQuizEligibility.ts
 export function useQuizEligibility() {
-  return async (mode: 'solo' | 'pvp'): Promise<boolean> => {
+  return async (mode: 'solo' | 'p2p'): Promise<boolean> => {
     const { allowed } = await api.get<{ allowed: boolean }>(`/quiz/eligibility?mode=${mode}`)
     return allowed
   }
@@ -117,15 +135,26 @@ export function useQuizEligibility() {
 If `allowed` is `false`, navigate to a new route (`/(quiz)/limit-wall?feature=solo|pvp`)
 instead of the quiz/matchmaking screen. If the eligibility call itself
 fails (network error), fail open (treat as allowed) — a guest limit isn't
-worth blocking the whole app over a flaky request.
+worth blocking the whole app over a flaky request. (For solo quiz this is
+just a UX nicety, since `startSolo` enforces the real limit server-side
+regardless; for PvP this fail-open IS the actual behavior on any check
+failure, consistent with it being a soft gate.)
 
 The 10-card feed limit is checked client-side only, inside
 `(tabs)/index.tsx`/`useFeed`: a counter in `AsyncStorage`
 (`factora.guestCardsViewed`, incrementing once per unique card id the
-first time it's scrolled into view) is compared against `10` on each
-scroll-position update. Once reached, the feed's `FlatList` is replaced
-with the same limit-wall component (`feature=cards`), inline rather than
-via navigation (the feed is the home tab, not a screen you navigate into).
+first time it's scrolled into view) is compared against `10`. The feed
+currently uses `Animated.FlatList` with a Reanimated `useAnimatedScrollHandler`
+worklet (UI thread) for its progress bar — that scroll handler is not where
+card-viewed detection or the `AsyncStorage` read/write should happen, since
+worklets run off the JS thread and can't await an async storage call
+directly. Instead, add a plain (JS-thread) `onViewableItemsChanged` callback
+(a standard `FlatList` prop, orthogonal to the existing Reanimated scroll
+handler — both can coexist on the same list) that fires once per card
+becoming visible; that callback does the `AsyncStorage` increment/check.
+Once the count reaches 10, the feed's `FlatList` is replaced with the same
+limit-wall component (`feature=cards`), inline rather than via navigation
+(the feed is the home tab, not a screen you navigate into).
 
 ---
 
@@ -177,15 +206,15 @@ public AuthResponse mergeGuestIntoGoogle(String guestId, String idToken) {
     User guest = userRepo.findByGuestId(guestId)
             .orElseThrow(() -> new IllegalArgumentException("Unknown guestId"));
 
-    boolean isNewGoogleUser = userRepo.findByFirebaseUid(uid).isEmpty();
-    User google = userRepo.findByFirebaseUid(uid).orElseGet(() -> {
+    Optional<User> existingGoogleUser = userRepo.findByFirebaseUid(uid);
+    User google = existingGoogleUser.orElseGet(() -> {
         User u = User.builder().firebaseUid(uid).email(email).username(name).provider("google").build();
         User saved = userRepo.save(u);
         profileRepo.save(UserProfile.builder().userId(saved.getId()).build());
         return saved;
     });
 
-    if (isNewGoogleUser) {
+    if (existingGoogleUser.isEmpty()) {
         // Brand new Google account — migrate the guest's progress onto it.
         UserProfile guestProfile = profileRepo.findByUserId(guest.getId()).orElse(null);
         if (guestProfile != null) {
@@ -202,9 +231,15 @@ public AuthResponse mergeGuestIntoGoogle(String guestId, String idToken) {
                 .forEach(r -> { r.setUserId(google.getId()); quizResultRepo.save(r); });
         cardInteractionRepo.findByUserId(guest.getId())
                 .forEach(ci -> { ci.setUserId(google.getId()); cardInteractionRepo.save(ci); });
+    } else {
+        // The Google account already had its own progress — it wins.
+        // Guest data must be explicitly deleted here, not just left behind:
+        // QuizResult/CardInteraction.userId are plain strings (no JPA FK),
+        // so simply deleting the guest User row below would silently orphan
+        // these rows rather than removing them.
+        quizResultRepo.deleteAll(quizResultRepo.findByUserIdOrderByPlayedAtDesc(guest.getId()));
+        cardInteractionRepo.deleteAll(cardInteractionRepo.findByUserId(guest.getId()));
     }
-    // Else: the Google account already had its own progress — it wins,
-    // guest data is simply discarded (deleted below either way).
 
     profileRepo.findByUserId(guest.getId()).ifPresent(profileRepo::delete);
     userRepo.delete(guest);
@@ -235,12 +270,18 @@ the frontend needs the resulting jwt/user back, same as any other login.)
 ## 6. Testing
 
 - Backend: `QuizService.checkEligibility` — unit tests for guest
-  under/at/over each limit, and a google user always allowed regardless of
-  count.
+  under/at/over each limit (including a forfeit-scored `QuizResult`
+  counting the same as a normal win/loss), and a google user always
+  allowed regardless of count.
+- Backend: `QuizService.startSolo` — new test confirming a guest at the
+  5-quiz limit gets rejected (403/exception) even if they never called
+  `/quiz/eligibility` first — this is the actual enforcement, not just the
+  precheck endpoint.
 - Backend: `AuthService.mergeGuestIntoGoogle` — new-Google-account case
   (progress migrates, guest row gone), existing-Google-account case (guest
-  data discarded, Google's own data untouched), unknown-guestId case
-  (throws/400).
+  data — including `QuizResult`/`CardInteraction` rows, not just the
+  profile — actually deleted, not orphaned; Google's own data untouched),
+  unknown-guestId case (throws/400).
 - Frontend: `useQuizEligibility` — allowed/blocked responses, fail-open on
   network error.
 - No isolated test for `GuestLimitWall`/the merge button — thin UI glue,
