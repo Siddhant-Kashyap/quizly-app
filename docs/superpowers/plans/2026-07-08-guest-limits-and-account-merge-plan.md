@@ -108,7 +108,15 @@ Add to `QuizControllerTest.java`:
 
 ```java
 @Test
-void eligibility_returnsAllowedTrueForAuthenticatedUser() throws Exception {
+void eligibility_wiresRequestParamAndAuthThrough_returns200WithAllowedField() throws Exception {
+    // TestTokenHelper.userToken()'s subject ("test-user") has no backing User
+    // row in this test's database, so this actually exercises checkEligibility's
+    // "unresolvable user → allowed" branch (see the plan's "Context for the
+    // implementer" note) — it's verifying the endpoint's HTTP wiring (auth
+    // header → principal → query param → response shape), not "a real
+    // authenticated user is always allowed" (that's already covered by
+    // checkEligibility_googleUser_alwaysAllowedRegardlessOfCount in
+    // QuizServiceTest).
     mockMvc.perform(get("/quiz/eligibility?mode=solo")
                     .header("Authorization", "Bearer " + TestTokenHelper.userToken()))
             .andExpect(status().isOk())
@@ -116,7 +124,10 @@ void eligibility_returnsAllowedTrueForAuthenticatedUser() throws Exception {
 }
 ```
 
-(Add `import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;` to `QuizControllerTest.java`'s existing static imports if not already present as a wildcard — check the existing `import static ... .*;` line first, it likely already covers `get`.)
+`QuizControllerTest.java`'s existing static import (line 13) is
+`import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;`
+— a specific single-method import, not a wildcard. Add a second one:
+`import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;`
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -680,7 +691,15 @@ import { useProfileStore } from '@/features/profile/store'
 import { api } from '@/shared/lib/api'
 import * as googleSignIn from '../lib/googleSignIn'
 
-jest.mock('@/shared/lib/api', () => ({ api: { post: jest.fn() } }))
+// store.ts imports setAuthToken/setGuestId from this same module and calls
+// them unconditionally inside login()/logout()/continueAsGuest() — since
+// this test uses the REAL useAuthStore (not mocked), those must be stubbed
+// too, or store.login(...) throws "setAuthToken is not a function".
+jest.mock('@/shared/lib/api', () => ({
+  api: { post: jest.fn() },
+  setAuthToken: jest.fn(),
+  setGuestId: jest.fn(),
+}))
 jest.mock('../lib/googleSignIn', () => ({ signInWithGoogle: jest.fn() }))
 
 const mockUser = { id: 'google-user-1', username: 'Merged User', email: 'm@example.com', avatarUrl: null }
