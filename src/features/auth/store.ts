@@ -37,7 +37,7 @@ export const useAuthStore = create<AuthState>()(
         setGuestId(guestId)
         set({ isGuest: true, guestId })
       },
-      setHasHydrated: (value) => set({ hasHydrated: value }),
+      setHasHydrated: (value) => { set({ hasHydrated: value }) },
     }),
     {
       name: 'quizly.auth',
@@ -48,10 +48,16 @@ export const useAuthStore = create<AuthState>()(
       // this, every JS reload silently drops auth: the store still looks
       // logged in, but every request goes out with no auth headers at all.
       onRehydrateStorage: () => (state) => {
-        if (!state) return
-        setAuthToken(state.token)
-        setGuestId(state.guestId)
-        state.setHasHydrated(true)
+        // Called on both success (state present) and failure (state
+        // undefined, e.g. corrupt/partial storage). hasHydrated must be set
+        // true either way — readers gating on it (useGuestCardLimit's
+        // isReady) would otherwise hang on the loading skeleton forever if
+        // this device's persisted auth blob ever failed to parse.
+        if (state) {
+          setAuthToken(state.token)
+          setGuestId(state.guestId)
+        }
+        useAuthStore.getState().setHasHydrated(true)
       },
     },
   ),

@@ -69,6 +69,6 @@ test('isReady is false until both auth hydration and the initial AsyncStorage lo
 
   expect(result.current.isReady).toBe(false)
 
-  useAuthStore.setState({ hasHydrated: true })
+  act(() => { useAuthStore.setState({ hasHydrated: true }) })
   await waitFor(() => expect(result.current.isReady).toBe(true))
 })
