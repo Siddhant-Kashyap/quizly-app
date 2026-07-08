@@ -1,6 +1,6 @@
 import { renderHook, waitFor, act } from '@testing-library/react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { useGuestCardLimit } from '../useGuestCardLimit'
+import { useGuestCardLimit, GUEST_CARDS_VIEWED_KEY } from '../useGuestCardLimit'
 import { useAuthStore } from '@/features/auth/store'
 
 beforeEach(async () => {
@@ -48,7 +48,7 @@ test('persists the viewed count across a remount (AsyncStorage)', async () => {
 })
 
 test('a recordView call that lands before the initial AsyncStorage load resolves does not lose either side\'s data', async () => {
-  await AsyncStorage.setItem('factora.guestCardsViewed', JSON.stringify(['old-card-1', 'old-card-2']))
+  await AsyncStorage.setItem(GUEST_CARDS_VIEWED_KEY, JSON.stringify(['old-card-1', 'old-card-2']))
   const { result } = renderHook(() => useGuestCardLimit())
 
   // Call recordView synchronously, before the mount effect's AsyncStorage.getItem has resolved.
@@ -57,7 +57,7 @@ test('a recordView call that lands before the initial AsyncStorage load resolves
   // Once everything settles, both the pre-existing disk history AND the
   // new view recorded before the load finished must both be present.
   await waitFor(async () => {
-    const raw = await AsyncStorage.getItem('factora.guestCardsViewed')
+    const raw = await AsyncStorage.getItem(GUEST_CARDS_VIEWED_KEY)
     const stored = JSON.parse(raw ?? '[]')
     expect(stored).toEqual(expect.arrayContaining(['old-card-1', 'old-card-2', 'new-card']))
   })
